@@ -1,3 +1,11 @@
-import { handlers } from "@/libs/next-auth";
+export async function GET() {
+  return Response.json({
+    message: "Auth is disabled for this personal OptionPilot build.",
+  });
+}
 
-export const { GET, POST } = handlers;
+export async function POST() {
+  return Response.json({
+    message: "Auth is disabled for this personal OptionPilot build.",
+  });
+}
