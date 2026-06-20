@@ -106,6 +106,10 @@ async function scanSymbol(
     },
   );
 
+  if (!response.ok) {
+    return null;
+  }
+
   const data = await response.json();
 
   const price = Number(data.c || 0);
@@ -130,8 +134,8 @@ async function scanSymbol(
     previousClose: previousClose.toFixed(2),
     changePercent: changePercent.toFixed(2),
     bestPlay,
-    pattern: "Open full scanner",
-    candle: "Click for RSI/EMA",
+    pattern: "See Scanner",
+    candle: "See Scanner",
     confidence: 0,
     score,
     setupQuality,

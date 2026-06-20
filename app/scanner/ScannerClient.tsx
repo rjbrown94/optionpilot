@@ -261,6 +261,43 @@ function getOptionsImpact(news: NewsData | null) {
   return "Wait for chart confirmation";
 }
 
+function hasNumber(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function formatNumber(value: number | null | undefined, decimals = 2) {
+  return hasNumber(value) ? value.toFixed(decimals) : "N/A";
+}
+
+function getRsiSignal(value: number | null | undefined) {
+  if (!hasNumber(value)) return "N/A";
+  if (value >= 70) return "Overbought";
+  if (value <= 30) return "Oversold";
+  if (value > 55 && value < 70) return "Bullish momentum";
+  if (value > 30 && value < 45) return "Bearish momentum";
+  return "Neutral";
+}
+
+function getTrendSignalFromStock(stock: StockData | null) {
+  if (!stock || !hasNumber(stock.ema20) || !hasNumber(stock.ema50))
+    return "N/A";
+
+  if (stock.price > stock.ema20! && stock.price > stock.ema50!) {
+    return "Bullish: price above EMA 20 and EMA 50";
+  }
+
+  if (stock.price < stock.ema20! && stock.price < stock.ema50!) {
+    return "Bearish: price below EMA 20 and EMA 50";
+  }
+
+  return "Neutral";
+}
+
+function getMomentumLabelFromStock(stock: StockData | null) {
+  if (!stock || !hasNumber(stock.relativeVolume)) return "Not enough data";
+  return stock.relativeVolume! >= 1.2 ? "Strong volume" : "Normal volume";
+}
+
 function getTradeScore({
   trend,
   chartAnalysis,
@@ -396,49 +433,44 @@ export default function ScannerPage() {
   }, [searchParams]);
 
   const chartAnalysis = getChartAnalysis(candles);
+  const displayCandles = candles.slice(-45);
 
   const finalAnalysis = {
     ...chartAnalysis,
     trend: stock?.trend ? stock.trend.toLowerCase() : chartAnalysis.trend,
-    rsi: stock?.rsi14 ? stock.rsi14.toFixed(2) : chartAnalysis.rsi,
-    rsiSignal:
-      stock?.rsi14 !== undefined && stock?.rsi14 !== null
-        ? stock.rsi14 >= 70
-          ? "Overbought"
-          : stock.rsi14 <= 30
-            ? "Oversold"
-            : stock.rsi14 > 55
-              ? "Bullish momentum"
-              : stock.rsi14 < 45
-                ? "Bearish momentum"
-                : "Neutral"
-        : chartAnalysis.rsiSignal,
-    ema20: stock?.ema20 ? stock.ema20.toFixed(2) : chartAnalysis.ema20,
-    ema50: stock?.ema50 ? stock.ema50.toFixed(2) : chartAnalysis.ema50,
-    volumeRatio: stock?.relativeVolume
-      ? stock.relativeVolume.toFixed(2)
-      : chartAnalysis.volumeRatio,
-    support: stock?.support ? stock.support.toFixed(2) : chartAnalysis.support,
-    resistance: stock?.resistance
-      ? stock.resistance.toFixed(2)
+    momentum: stock ? getMomentumLabelFromStock(stock) : chartAnalysis.momentum,
+    support: hasNumber(stock?.support)
+      ? formatNumber(stock?.support)
+      : chartAnalysis.support,
+    resistance: hasNumber(stock?.resistance)
+      ? formatNumber(stock?.resistance)
       : chartAnalysis.resistance,
-    candlePattern: stock?.candlePattern || chartAnalysis.candlePattern,
-    momentumScore: stock?.momentumScore || chartAnalysis.momentumScore,
-    momentum:
-      stock?.relativeVolume && stock.relativeVolume >= 1.2
-        ? "Strong volume"
-        : chartAnalysis.momentum,
-    trendSignal:
-      stock?.ema20 && stock?.ema50
-        ? stock.price > stock.ema20 && stock.price > stock.ema50
-          ? "Bullish: price above EMA 20 and EMA 50"
-          : stock.price < stock.ema20 && stock.price < stock.ema50
-            ? "Bearish: price below EMA 20 and EMA 50"
-            : "Neutral"
-        : chartAnalysis.trendSignal,
+    candlePattern:
+      stock?.candlePattern && stock.candlePattern !== "Unknown"
+        ? stock.candlePattern
+        : chartAnalysis.candlePattern,
+    momentumScore: hasNumber(stock?.momentumScore)
+      ? stock!.momentumScore!
+      : chartAnalysis.momentumScore,
+    volumeRatio: hasNumber(stock?.relativeVolume)
+      ? formatNumber(stock?.relativeVolume)
+      : chartAnalysis.volumeRatio,
+    ema20: hasNumber(stock?.ema20)
+      ? formatNumber(stock?.ema20)
+      : chartAnalysis.ema20,
+    ema50: hasNumber(stock?.ema50)
+      ? formatNumber(stock?.ema50)
+      : chartAnalysis.ema50,
+    rsi: hasNumber(stock?.rsi14)
+      ? formatNumber(stock?.rsi14)
+      : chartAnalysis.rsi,
+    rsiSignal: hasNumber(stock?.rsi14)
+      ? getRsiSignal(stock?.rsi14)
+      : chartAnalysis.rsiSignal,
+    trendSignal: stock
+      ? getTrendSignalFromStock(stock)
+      : chartAnalysis.trendSignal,
   };
-
-  const displayCandles = candles.slice(-45);
 
   const trend =
     finalAnalysis.trend === "neutral"
