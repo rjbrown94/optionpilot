@@ -12,6 +12,36 @@ type TwelveDataCandle = {
   volume: string;
 };
 
+type AutoScanResult = {
+  symbol: string;
+  price: string;
+  previousClose: string;
+  changePercent: string;
+  bestPlay: string;
+  pattern: string;
+  candle: string;
+  confidence: number;
+  score: number;
+  setupQuality: string;
+  status: string;
+  scannerUrl: string;
+};
+
+const cache = new Map<
+  string,
+  {
+    timestamp: number;
+    data: {
+      category: string;
+      limit: number;
+      updatedAt: string;
+      results: AutoScanResult[];
+    };
+  }
+>();
+
+const CACHE_TIME = 60 * 1000;
+
 function getSetupQuality(score: number) {
   if (score >= 90) return "Elite";
   if (score >= 80) return "Strong";
@@ -33,8 +63,10 @@ async function getPatternData(symbol: string) {
 
   try {
     const response = await fetch(
-      `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=1day&outputsize=120&apikey=${apiKey}`,
-      { cache: "no-store" },
+      `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=1day&outputsize=60&apikey=${apiKey}`,
+      {
+        next: { revalidate: 60 },
+      },
     );
 
     const data = await response.json();
@@ -90,6 +122,60 @@ async function getPatternData(symbol: string) {
   }
 }
 
+async function scanSymbol(
+  symbol: string,
+  apiKey: string,
+): Promise<AutoScanResult> {
+  const [quoteResponse, patternData] = await Promise.all([
+    fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${apiKey}`, {
+      next: { revalidate: 30 },
+    }),
+    getPatternData(symbol),
+  ]);
+
+  const data = await quoteResponse.json();
+
+  const price = Number(data.c || 0);
+  const previousClose = Number(data.pc || 0);
+
+  const changePercent =
+    previousClose > 0 ? ((price - previousClose) / previousClose) * 100 : 0;
+
+  const priceDirection = changePercent >= 0 ? "CALLS" : "PUTS";
+
+  const bestPlay =
+    patternData.patternDirection !== "WAIT"
+      ? patternData.patternDirection
+      : priceDirection;
+
+  let score = 50;
+
+  if (Math.abs(changePercent) >= 1) score += 10;
+  if (Math.abs(changePercent) >= 2) score += 10;
+  if (Math.abs(changePercent) >= 4) score += 15;
+  if (price > 0) score += 10;
+  if (patternData.pattern !== "No confirmed pattern") score += 15;
+  if (patternData.candle !== "No confirmed candle") score += 10;
+  if (patternData.confidence >= 85) score += 10;
+
+  score = Math.min(score, 100);
+
+  return {
+    symbol,
+    price: price.toFixed(2),
+    previousClose: previousClose.toFixed(2),
+    changePercent: changePercent.toFixed(2),
+    bestPlay,
+    pattern: patternData.pattern,
+    candle: patternData.candle,
+    confidence: patternData.confidence,
+    score,
+    setupQuality: getSetupQuality(score),
+    status: score >= 90 ? "TRADE READY" : "WATCH",
+    scannerUrl: `/scanner?symbol=${symbol}`,
+  };
+}
+
 export async function GET(req: Request) {
   const apiKey = process.env.FINNHUB_API_KEY;
 
@@ -101,73 +187,46 @@ export async function GET(req: Request) {
   }
 
   const { searchParams } = new URL(req.url);
-  const category = searchParams.get("category") || "Core";
 
-  const symbols = watchlistCategories[category] || watchlistCategories.Core;
+  const category = searchParams.get("category") || "Core";
+  const rawLimit = Number(searchParams.get("limit") || 10);
+  const limit = Math.min(Math.max(rawLimit, 1), 15);
+
+  const allSymbols = watchlistCategories[category] || watchlistCategories.Core;
+  const symbols = allSymbols.slice(0, limit);
+
+  const cacheKey = `${category}-${limit}`;
+  const cached = cache.get(cacheKey);
+
+  if (cached && Date.now() - cached.timestamp < CACHE_TIME) {
+    return NextResponse.json({
+      ...cached.data,
+      cached: true,
+    });
+  }
 
   try {
     const results = await Promise.all(
-      symbols.map(async (symbol) => {
-        const [quoteResponse, patternData] = await Promise.all([
-          fetch(
-            `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${apiKey}`,
-            { cache: "no-store" },
-          ),
-          getPatternData(symbol),
-        ]);
-
-        const data = await quoteResponse.json();
-
-        const price = Number(data.c || 0);
-        const previousClose = Number(data.pc || 0);
-
-        const changePercent =
-          previousClose > 0
-            ? ((price - previousClose) / previousClose) * 100
-            : 0;
-
-        const priceDirection = changePercent >= 0 ? "CALLS" : "PUTS";
-
-        const bestPlay =
-          patternData.patternDirection !== "WAIT"
-            ? patternData.patternDirection
-            : priceDirection;
-
-        let score = 50;
-
-        if (Math.abs(changePercent) >= 1) score += 10;
-        if (Math.abs(changePercent) >= 2) score += 10;
-        if (Math.abs(changePercent) >= 4) score += 15;
-        if (price > 0) score += 10;
-        if (patternData.pattern !== "No confirmed pattern") score += 15;
-        if (patternData.candle !== "No confirmed candle") score += 10;
-        if (patternData.confidence >= 85) score += 10;
-
-        score = Math.min(score, 100);
-
-        return {
-          symbol,
-          price: price.toFixed(2),
-          previousClose: previousClose.toFixed(2),
-          changePercent: changePercent.toFixed(2),
-          bestPlay,
-          pattern: patternData.pattern,
-          candle: patternData.candle,
-          confidence: patternData.confidence,
-          score,
-          setupQuality: getSetupQuality(score),
-          status: score >= 80 ? "TRADE READY" : "WAIT",
-          scannerUrl: `/scanner?symbol=${symbol}`,
-        };
-      }),
+      symbols.map((symbol) => scanSymbol(symbol, apiKey)),
     );
 
-    const sorted = results.sort((a, b) => b.score - a.score);
+    const sorted = results.sort((a, b) => b.score - a.score).slice(0, 10);
 
-    return NextResponse.json({
+    const responseData = {
       category,
+      limit,
       updatedAt: new Date().toISOString(),
       results: sorted,
+    };
+
+    cache.set(cacheKey, {
+      timestamp: Date.now(),
+      data: responseData,
+    });
+
+    return NextResponse.json({
+      ...responseData,
+      cached: false,
     });
   } catch (error) {
     return NextResponse.json(
