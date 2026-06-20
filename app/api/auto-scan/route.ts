@@ -25,6 +25,7 @@ type AutoScanResult = {
   setupQuality: string;
   status: string;
   scannerUrl: string;
+  signal: string;
 };
 
 const cache = new Map<
@@ -47,6 +48,60 @@ function getSetupQuality(score: number) {
   if (score >= 80) return "Strong";
   if (score >= 70) return "Good";
   return "Wait";
+}
+
+function getSignal(bestPlay: string, score: number, confidence: number) {
+  if (score >= 90 && confidence >= 80) {
+    return bestPlay === "PUTS" ? "🚀 STRONG PUT" : "🚀 STRONG CALL";
+  }
+
+  if (score >= 80 && confidence >= 70) {
+    return bestPlay === "PUTS" ? "🔥 WATCH PUT" : "🔥 WATCH CALL";
+  }
+
+  return "WAIT";
+}
+
+function getStatus(
+  score: number,
+  confidence: number,
+  hasPattern: boolean,
+  hasCandle: boolean,
+) {
+  if (score >= 90 && confidence >= 80 && (hasPattern || hasCandle)) {
+    return "TRADE READY";
+  }
+
+  if (score >= 80 && (hasPattern || hasCandle)) {
+    return "WATCH";
+  }
+
+  return "WAIT";
+}
+
+function isBadPrice(symbol: string, price: number) {
+  if (!price || price <= 0) return true;
+
+  const maxReasonablePrice: Record<string, number> = {
+    SPY: 700,
+    QQQ: 650,
+    AAPL: 300,
+    AMD: 300,
+    NVDA: 300,
+    TSLA: 600,
+    MSFT: 700,
+    META: 900,
+    AMZN: 400,
+    NFLX: 1500,
+    GOOG: 400,
+    GOOGL: 400,
+  };
+
+  const maxPrice = maxReasonablePrice[symbol];
+
+  if (!maxPrice) return false;
+
+  return price > maxPrice;
 }
 
 async function getPatternData(symbol: string) {
@@ -125,7 +180,7 @@ async function getPatternData(symbol: string) {
 async function scanSymbol(
   symbol: string,
   apiKey: string,
-): Promise<AutoScanResult> {
+): Promise<AutoScanResult | null> {
   const [quoteResponse, patternData] = await Promise.all([
     fetch(`https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${apiKey}`, {
       next: { revalidate: 30 },
@@ -138,6 +193,10 @@ async function scanSymbol(
   const price = Number(data.c || 0);
   const previousClose = Number(data.pc || 0);
 
+  if (isBadPrice(symbol, price)) {
+    return null;
+  }
+
   const changePercent =
     previousClose > 0 ? ((price - previousClose) / previousClose) * 100 : 0;
 
@@ -148,17 +207,34 @@ async function scanSymbol(
       ? patternData.patternDirection
       : priceDirection;
 
-  let score = 50;
+  const hasPattern = patternData.pattern !== "No confirmed pattern";
+  const hasCandle = patternData.candle !== "No confirmed candle";
+
+  let score = 40;
 
   if (Math.abs(changePercent) >= 1) score += 10;
   if (Math.abs(changePercent) >= 2) score += 10;
-  if (Math.abs(changePercent) >= 4) score += 15;
-  if (price > 0) score += 10;
-  if (patternData.pattern !== "No confirmed pattern") score += 15;
-  if (patternData.candle !== "No confirmed candle") score += 10;
+  if (Math.abs(changePercent) >= 4) score += 10;
+  if (price > 0) score += 5;
+  if (hasPattern) score += 20;
+  if (hasCandle) score += 15;
+  if (patternData.confidence >= 75) score += 10;
   if (patternData.confidence >= 85) score += 10;
 
+  if (!hasPattern && !hasCandle) {
+    score = Math.min(score, 75);
+  }
+
   score = Math.min(score, 100);
+
+  const setupQuality = getSetupQuality(score);
+  const status = getStatus(
+    score,
+    patternData.confidence,
+    hasPattern,
+    hasCandle,
+  );
+  const signal = getSignal(bestPlay, score, patternData.confidence);
 
   return {
     symbol,
@@ -170,8 +246,9 @@ async function scanSymbol(
     candle: patternData.candle,
     confidence: patternData.confidence,
     score,
-    setupQuality: getSetupQuality(score),
-    status: score >= 90 ? "TRADE READY" : "WATCH",
+    setupQuality,
+    status,
+    signal,
     scannerUrl: `/scanner?symbol=${symbol}`,
   };
 }
@@ -206,17 +283,20 @@ export async function GET(req: Request) {
   }
 
   try {
-    const results = await Promise.all(
+    const scanned = await Promise.all(
       symbols.map((symbol) => scanSymbol(symbol, apiKey)),
     );
 
-    const sorted = results.sort((a, b) => b.score - a.score).slice(0, 10);
+    const results = scanned
+      .filter((result): result is AutoScanResult => result !== null)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
 
     const responseData = {
       category,
       limit,
       updatedAt: new Date().toISOString(),
-      results: sorted,
+      results,
     };
 
     cache.set(cacheKey, {
