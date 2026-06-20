@@ -26,6 +26,28 @@ type StockData = {
   previousClose: number;
   change: number;
   percentChange: number;
+
+  trend?: string;
+  bestPlay?: string;
+
+  rsi14?: number | null;
+  ema20?: number | null;
+  ema50?: number | null;
+
+  volume?: number;
+  averageVolume?: number;
+  relativeVolume?: number;
+
+  support?: number | null;
+  resistance?: number | null;
+
+  candlePattern?: string;
+  candleDirection?: string;
+  candleConfidence?: number;
+
+  momentumScore?: number;
+  setupQuality?: string;
+  score?: number;
 };
 
 type Candle = {
@@ -374,23 +396,65 @@ export default function ScannerPage() {
   }, [searchParams]);
 
   const chartAnalysis = getChartAnalysis(candles);
+
+  const finalAnalysis = {
+    ...chartAnalysis,
+    trend: stock?.trend ? stock.trend.toLowerCase() : chartAnalysis.trend,
+    rsi: stock?.rsi14 ? stock.rsi14.toFixed(2) : chartAnalysis.rsi,
+    rsiSignal:
+      stock?.rsi14 !== undefined && stock?.rsi14 !== null
+        ? stock.rsi14 >= 70
+          ? "Overbought"
+          : stock.rsi14 <= 30
+            ? "Oversold"
+            : stock.rsi14 > 55
+              ? "Bullish momentum"
+              : stock.rsi14 < 45
+                ? "Bearish momentum"
+                : "Neutral"
+        : chartAnalysis.rsiSignal,
+    ema20: stock?.ema20 ? stock.ema20.toFixed(2) : chartAnalysis.ema20,
+    ema50: stock?.ema50 ? stock.ema50.toFixed(2) : chartAnalysis.ema50,
+    volumeRatio: stock?.relativeVolume
+      ? stock.relativeVolume.toFixed(2)
+      : chartAnalysis.volumeRatio,
+    support: stock?.support ? stock.support.toFixed(2) : chartAnalysis.support,
+    resistance: stock?.resistance
+      ? stock.resistance.toFixed(2)
+      : chartAnalysis.resistance,
+    candlePattern: stock?.candlePattern || chartAnalysis.candlePattern,
+    momentumScore: stock?.momentumScore || chartAnalysis.momentumScore,
+    momentum:
+      stock?.relativeVolume && stock.relativeVolume >= 1.2
+        ? "Strong volume"
+        : chartAnalysis.momentum,
+    trendSignal:
+      stock?.ema20 && stock?.ema50
+        ? stock.price > stock.ema20 && stock.price > stock.ema50
+          ? "Bullish: price above EMA 20 and EMA 50"
+          : stock.price < stock.ema20 && stock.price < stock.ema50
+            ? "Bearish: price below EMA 20 and EMA 50"
+            : "Neutral"
+        : chartAnalysis.trendSignal,
+  };
+
   const displayCandles = candles.slice(-45);
 
   const trend =
-    chartAnalysis.trend === "neutral"
+    finalAnalysis.trend === "neutral"
       ? stock && stock.percentChange > 0
         ? "bullish"
         : "bearish"
-      : chartAnalysis.trend;
+      : finalAnalysis.trend;
 
   const tradeScore = getTradeScore({
     trend,
-    chartAnalysis,
+    chartAnalysis: finalAnalysis,
     news,
   });
 
   const volume =
-    chartAnalysis.momentum === "Strong volume" ? "strong" : "normal";
+    finalAnalysis.momentum === "Strong volume" ? "strong" : "normal";
 
   const result = getBestStrategy({
     ticker,
@@ -406,12 +470,12 @@ export default function ScannerPage() {
   const tradeSetup = {
     entry:
       trend === "bullish"
-        ? `Above resistance: $${chartAnalysis.resistance}`
-        : `Below support: $${chartAnalysis.support}`,
+        ? `Above resistance: $${finalAnalysis.resistance}`
+        : `Below support: $${finalAnalysis.support}`,
     stopLoss:
       trend === "bullish"
-        ? `Below support: $${chartAnalysis.support}`
-        : `Above resistance: $${chartAnalysis.resistance}`,
+        ? `Below support: $${finalAnalysis.support}`
+        : `Above resistance: $${finalAnalysis.resistance}`,
     target:
       trend === "bullish"
         ? "Next resistance / prior high"
@@ -647,62 +711,62 @@ export default function ScannerPage() {
 
             <div>
               <p className="text-gray-400">Trend Signal</p>
-              <p className="text-xl">{chartAnalysis.trendSignal}</p>
+              <p className="text-xl">{finalAnalysis.trendSignal}</p>
             </div>
 
             <div>
               <p className="text-gray-400">RSI 14</p>
-              <p className="text-xl">{chartAnalysis.rsi}</p>
+              <p className="text-xl">{finalAnalysis.rsi}</p>
             </div>
 
             <div>
               <p className="text-gray-400">RSI Signal</p>
-              <p className="text-xl">{chartAnalysis.rsiSignal}</p>
+              <p className="text-xl">{finalAnalysis.rsiSignal}</p>
             </div>
 
             <div>
               <p className="text-gray-400">EMA 20</p>
-              <p className="text-xl">${chartAnalysis.ema20}</p>
+              <p className="text-xl">${finalAnalysis.ema20}</p>
             </div>
 
             <div>
               <p className="text-gray-400">EMA 50</p>
-              <p className="text-xl">${chartAnalysis.ema50}</p>
+              <p className="text-xl">${finalAnalysis.ema50}</p>
             </div>
 
             <div>
               <p className="text-gray-400">Momentum</p>
-              <p className="text-xl">{chartAnalysis.momentum}</p>
+              <p className="text-xl">{finalAnalysis.momentum}</p>
             </div>
 
             <div>
               <p className="text-gray-400">Momentum Score</p>
-              <p className="text-xl">{chartAnalysis.momentumScore}/100</p>
+              <p className="text-xl">{finalAnalysis.momentumScore}/100</p>
             </div>
 
             <div>
               <p className="text-gray-400">Relative Volume</p>
-              <p className="text-xl">{chartAnalysis.volumeRatio}x</p>
+              <p className="text-xl">{finalAnalysis.volumeRatio}x</p>
             </div>
 
             <div>
               <p className="text-gray-400">Support</p>
-              <p className="text-xl">${chartAnalysis.support}</p>
+              <p className="text-xl">${finalAnalysis.support}</p>
             </div>
 
             <div>
               <p className="text-gray-400">Resistance</p>
-              <p className="text-xl">${chartAnalysis.resistance}</p>
+              <p className="text-xl">${finalAnalysis.resistance}</p>
             </div>
 
             <div>
               <p className="text-gray-400">Candle Pattern</p>
-              <p className="text-xl">{chartAnalysis.candlePattern}</p>
+              <p className="text-xl">{finalAnalysis.candlePattern}</p>
             </div>
 
             <div>
               <p className="text-gray-400">Breakout</p>
-              <p className="text-xl">{chartAnalysis.breakout}</p>
+              <p className="text-xl">{finalAnalysis.breakout}</p>
             </div>
           </div>
 
