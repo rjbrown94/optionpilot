@@ -16,13 +16,6 @@ export default function Navbar() {
         </Link>
 
         <Link
-          href="/market-discovery"
-          className="text-white hover:text-green-400 transition"
-        >
-          Discover
-        </Link>
-
-        <Link
           href="/news-catalyst"
           className="text-white hover:text-green-400 transition"
         >
@@ -41,13 +34,6 @@ export default function Navbar() {
           className="text-white hover:text-green-400 transition"
         >
           Scanner
-        </Link>
-
-        <Link
-          href="/options-flow"
-          className="text-white hover:text-green-400 transition"
-        >
-          Options Flow
         </Link>
 
         <Link
