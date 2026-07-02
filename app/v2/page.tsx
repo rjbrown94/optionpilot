@@ -9,9 +9,11 @@ import EconomicEvents from "@/components/dashboard/EconomicEvents";
 import EarningsToday from "@/components/dashboard/EarningsToday";
 import ScannerStatus from "@/components/dashboard/ScannerStatus";
 import { getMarketEngineResult } from "@/libs/market/marketEngine";
+import { getMarketSnapshot } from "@/libs/market/marketService";
 
-export default function V2DashboardPage() {
+export default async function V2DashboardPage() {
   const market = getMarketEngineResult();
+  const snapshot = await getMarketSnapshot();
 
   return (
     <main className="min-h-screen bg-black px-4 py-6 text-white sm:px-6 lg:px-8">
@@ -27,7 +29,7 @@ export default function V2DashboardPage() {
         </div>
 
         <div className="mb-6">
-          <MarketSnapshot />
+          <MarketSnapshot quotes={snapshot} />
         </div>
 
         <div className="grid gap-4 md:grid-cols-3">
