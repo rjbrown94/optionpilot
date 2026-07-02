@@ -8,8 +8,11 @@ import AIMorningBrief from "@/components/dashboard/AIMorningBrief";
 import EconomicEvents from "@/components/dashboard/EconomicEvents";
 import EarningsToday from "@/components/dashboard/EarningsToday";
 import ScannerStatus from "@/components/dashboard/ScannerStatus";
+import { getMarketEngineResult } from "@/libs/market/marketEngine";
 
 export default function V2DashboardPage() {
+  const market = getMarketEngineResult();
+
   return (
     <main className="min-h-screen bg-black px-4 py-6 text-white sm:px-6 lg:px-8">
       <div className="mx-auto max-w-6xl">
@@ -30,24 +33,36 @@ export default function V2DashboardPage() {
         <div className="grid gap-4 md:grid-cols-3">
           <MetricCard
             title="Market Bias"
-            value="Bullish"
-            subtitle="QQQ leading, VIX falling"
-            badge="85 Score"
-            tone="bullish"
+            value={market.bias}
+            subtitle="Calculated from macro signals"
+            badge={`${market.score} Score`}
+            tone={
+              market.bias === "Bullish"
+                ? "bullish"
+                : market.bias === "Bearish"
+                  ? "bearish"
+                  : "neutral"
+            }
           />
 
           <MetricCard
             title="Capital Flow"
-            value="Risk-On"
-            subtitle="Growth sectors showing strength"
-            badge="Strong"
-            tone="bullish"
+            value={market.capitalFlow}
+            subtitle="Based on risk appetite"
+            badge={market.capitalFlow}
+            tone={
+              market.capitalFlow === "Risk-On"
+                ? "bullish"
+                : market.capitalFlow === "Risk-Off"
+                  ? "bearish"
+                  : "neutral"
+            }
           />
 
           <MetricCard
             title="Top Sector"
-            value="Semis"
-            subtitle="AI and chips leading"
+            value={market.topSector.name}
+            subtitle={`${market.topSector.symbol} ${market.topSector.changePercent}%`}
             badge="Leading"
             tone="bullish"
           />
@@ -66,6 +81,15 @@ export default function V2DashboardPage() {
 
         <div className="mt-6">
           <AIMorningBrief />
+        </div>
+
+        <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5">
+          <h2 className="text-xl font-bold text-white">
+            Market Engine Summary
+          </h2>
+          <p className="mt-3 text-sm leading-6 text-zinc-300">
+            {market.summary}
+          </p>
         </div>
       </div>
     </main>
