@@ -1,54 +1,42 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 export default function Navbar() {
+  const pathname = usePathname();
+
+  const links = [
+    { href: "/", label: "Home" },
+    { href: "/options", label: "Options" },
+    { href: "/news-catalyst", label: "News" },
+    { href: "/auto-scanner", label: "Auto Scanner" },
+    { href: "/scanner", label: "Scanner" },
+    { href: "/watchlist", label: "Watchlist" },
+    { href: "/strategies", label: "Strategies" },
+  ];
+
   return (
     <nav className="border-b border-zinc-800 bg-black">
-      <div className="max-w-7xl mx-auto px-6 py-4 flex gap-8 text-white font-semibold">
-        <Link href="/" className="text-white hover:text-green-400 transition">
-          Home
-        </Link>
+      <div className="mx-auto flex max-w-7xl gap-8 px-6 py-4 font-semibold text-white">
+        {links.map((link) => {
+          const isActive =
+            link.href === "/"
+              ? pathname === "/"
+              : pathname.startsWith(link.href);
 
-        <Link
-          href="/options"
-          className="text-green-400 hover:text-green-300 transition"
-        >
-          Options
-        </Link>
-
-        <Link
-          href="/news-catalyst"
-          className="text-white hover:text-green-400 transition"
-        >
-          News
-        </Link>
-
-        <Link
-          href="/auto-scanner"
-          className="text-white hover:text-green-400 transition"
-        >
-          Auto Scanner
-        </Link>
-
-        <Link
-          href="/scanner"
-          className="text-white hover:text-green-400 transition"
-        >
-          Scanner
-        </Link>
-
-        <Link
-          href="/watchlist"
-          className="text-white hover:text-green-400 transition"
-        >
-          Watchlist
-        </Link>
-
-        <Link
-          href="/strategies"
-          className="text-white hover:text-green-400 transition"
-        >
-          Strategies
-        </Link>
+          return (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={`transition ${
+                isActive ? "text-green-400" : "text-white hover:text-green-400"
+              }`}
+            >
+              {link.label}
+            </Link>
+          );
+        })}
       </div>
     </nav>
   );
