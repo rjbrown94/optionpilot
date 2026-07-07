@@ -9,24 +9,46 @@ export type LiveQuote = {
 
 export async function getQuote(symbol: string): Promise<LiveQuote | null> {
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const apiKey = process.env.FINNHUB_API_KEY;
 
-    const res = await fetch(`${baseUrl}/api/quote?symbol=${symbol}`, {
-      cache: "no-store",
-    });
+    if (!apiKey) {
+      console.error("Missing FINNHUB_API_KEY");
+      return null;
+    }
 
-    if (!res.ok) return null;
+    const res = await fetch(
+      `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${apiKey}`,
+      {
+        cache: "no-store",
+      },
+    );
 
-    return await res.json();
-  } catch {
+    if (!res.ok) {
+      return null;
+    }
+
+    const data = await res.json();
+
+    if (!data || typeof data.c !== "number") {
+      return null;
+    }
+
+    return {
+      symbol,
+      price: data.c,
+      change: data.d,
+      percentChange: data.dp,
+    };
+  } catch (error) {
+    console.error("Quote fetch failed:", error);
     return null;
   }
 }
 
-export async function getMarketSnapshot() {
+export async function getMarketSnapshot(): Promise<LiveQuote[]> {
   const quotes = await Promise.all(
     marketSnapshotSymbols.map((symbol) => getQuote(symbol)),
   );
 
-  return quotes.filter(Boolean) as LiveQuote[];
+  return quotes.filter((quote): quote is LiveQuote => quote !== null);
 }
