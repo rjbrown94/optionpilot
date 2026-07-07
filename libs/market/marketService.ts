@@ -1,1 +1,6 @@
-export { getQuote, getMarketSnapshot, type LiveQuote } from "./services/quotes";
+export {
+  getQuote,
+  getMarketSnapshot,
+  getSectorSnapshot,
+  type LiveQuote,
+} from "./services/quotes";

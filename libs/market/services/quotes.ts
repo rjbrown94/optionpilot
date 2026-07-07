@@ -1,4 +1,4 @@
-import { marketSnapshotSymbols } from "../symbols";
+import { marketSnapshotSymbols, sectorSymbols } from "../symbols";
 
 export type LiveQuote = {
   symbol: string;
@@ -48,6 +48,14 @@ export async function getQuote(symbol: string): Promise<LiveQuote | null> {
 export async function getMarketSnapshot(): Promise<LiveQuote[]> {
   const quotes = await Promise.all(
     marketSnapshotSymbols.map((symbol) => getQuote(symbol)),
+  );
+
+  return quotes.filter((quote): quote is LiveQuote => quote !== null);
+}
+
+export async function getSectorSnapshot(): Promise<LiveQuote[]> {
+  const quotes = await Promise.all(
+    sectorSymbols.map((symbol) => getQuote(symbol)),
   );
 
   return quotes.filter((quote): quote is LiveQuote => quote !== null);

@@ -1,40 +1,58 @@
-import {
+import type {
   CapitalFlow,
   MarketBias,
   MarketEngineResult,
   MacroIndicator,
   SectorSignal,
 } from "./types";
-import { mockMacroIndicators, mockSectorStrength } from "./mockData";
 
-function getIndicator(symbol: string, macro: MacroIndicator[]) {
-  return macro.find((item) => item.symbol === symbol);
+import type { LiveQuote } from "./marketService";
+
+import { mockMacroIndicators } from "./mockData";
+
+function quoteToMacro(quote: LiveQuote): MacroIndicator {
+  return {
+    name: quote.symbol,
+    symbol: quote.symbol,
+    value: `${quote.percentChange.toFixed(2)}%`,
+    changePercent: quote.percentChange,
+    direction:
+      quote.percentChange > 0
+        ? "up"
+        : quote.percentChange < 0
+          ? "down"
+          : "flat",
+  };
 }
 
-function calculateScore(macro: MacroIndicator[], sectors: SectorSignal[]) {
+function calculateLiveScore(quotes: LiveQuote[]) {
   let score = 50;
 
-  const spy = getIndicator("SPY", macro);
-  const qqq = getIndicator("QQQ", macro);
-  const dxy = getIndicator("DXY", macro);
-  const vix = getIndicator("VIX", macro);
-  const yield10 = getIndicator("10Y", macro);
+  const get = (symbol: string) => quotes.find((q) => q.symbol === symbol);
 
-  if (spy && spy.changePercent > 0) score += 10;
-  if (qqq && qqq.changePercent > 0) score += 15;
-  if (dxy && dxy.changePercent < 0) score += 10;
-  if (vix && vix.changePercent < 0) score += 10;
-  if (yield10 && yield10.changePercent < 0) score += 10;
+  const spy = get("SPY");
+  const qqq = get("QQQ");
+  const dia = get("DIA");
+  const iwm = get("IWM");
+  const vixy = get("VIXY");
 
-  const topSector = [...sectors].sort(
-    (a, b) => b.changePercent - a.changePercent,
-  )[0];
+  if (spy?.percentChange! > 0) score += 15;
+  if (spy?.percentChange! < 0) score -= 15;
 
-  if (topSector?.symbol === "SMH" || topSector?.symbol === "XLK") {
-    score += 10;
-  }
+  if (qqq?.percentChange! > 0) score += 20;
+  if (qqq?.percentChange! < 0) score -= 20;
 
-  return Math.max(0, Math.min(100, score));
+  if (dia?.percentChange! > 0) score += 10;
+  if (dia?.percentChange! < 0) score -= 10;
+
+  if (iwm?.percentChange! > 0) score += 10;
+  if (iwm?.percentChange! < 0) score -= 10;
+
+  // Lower VIXY = Risk On
+  if (vixy?.percentChange! < 0) score += 15;
+  if (vixy?.percentChange! > 0) score -= 15;
+
+  return Math.max(0, Math.min(score, 100));
 }
 
 function getBias(score: number): MarketBias {
@@ -49,21 +67,13 @@ function getCapitalFlow(score: number): CapitalFlow {
   return "Mixed";
 }
 
-function getScannerPriority(topSector: SectorSignal) {
-  if (topSector.symbol === "SMH") {
-    return ["NVDA", "AMD", "AVGO", "MU", "TSM"];
+function getScannerPriority(capitalFlow: CapitalFlow) {
+  if (capitalFlow === "Risk-On") {
+    return ["NVDA", "AMD", "AVGO", "TSM", "MU"];
   }
 
-  if (topSector.symbol === "XLK") {
-    return ["MSFT", "AAPL", "META", "PLTR", "CRM"];
-  }
-
-  if (topSector.symbol === "XLE") {
-    return ["XOM", "CVX", "OXY", "SLB"];
-  }
-
-  if (topSector.symbol === "XLF") {
-    return ["JPM", "BAC", "GS", "MS"];
+  if (capitalFlow === "Risk-Off") {
+    return ["GLD", "XLU", "SQQQ"];
   }
 
   return ["SPY", "QQQ", "IWM"];
@@ -72,33 +82,58 @@ function getScannerPriority(topSector: SectorSignal) {
 function buildSummary(
   bias: MarketBias,
   capitalFlow: CapitalFlow,
-  topSector: SectorSignal,
+  score: number,
 ) {
-  return `Market conditions are currently ${bias.toLowerCase()} with ${capitalFlow.toLowerCase()} behavior. ${topSector.name} is showing the strongest relative strength, so scanner priority should focus on stocks connected to ${topSector.name.toLowerCase()} first.`;
+  return `Live market conditions are currently ${bias.toLowerCase()} with ${capitalFlow.toLowerCase()} behavior. The market score is ${score}/100 based on SPY, QQQ, DIA, IWM, and VIXY movement.`;
 }
 
-export function getMarketEngineResult(): MarketEngineResult {
-  const macro = mockMacroIndicators;
-  const sectors = mockSectorStrength;
+export function getMarketEngineResult(
+  liveQuotes: LiveQuote[],
+  sectorQuotes: LiveQuote[] = [],
+): MarketEngineResult {
+  if (!liveQuotes.length) {
+    return {
+      bias: "Neutral",
+      capitalFlow: "Mixed",
+      score: 50,
+      topSector: {
+        name: "Unknown",
+        symbol: "--",
+        changePercent: 0,
+      },
+      macro: mockMacroIndicators,
+      sectors: [],
+      scannerPriority: ["SPY", "QQQ"],
+      summary:
+        "Live market data is unavailable, so OptionPilot is using a neutral market view.",
+    };
+  }
 
-  const topSector = [...sectors].sort(
-    (a, b) => b.changePercent - a.changePercent,
-  )[0];
+  const score = calculateLiveScore(liveQuotes);
 
-  const score = calculateScore(macro, sectors);
   const bias = getBias(score);
+
   const capitalFlow = getCapitalFlow(score);
-  const scannerPriority = getScannerPriority(topSector);
-  const summary = buildSummary(bias, capitalFlow, topSector);
+
+  const strongestSector =
+    sectorQuotes.length > 0
+      ? [...sectorQuotes].sort((a, b) => b.percentChange - a.percentChange)[0]
+      : undefined;
+
+  const topSector: SectorSignal = {
+    name: strongestSector?.symbol ?? "Unknown",
+    symbol: strongestSector?.symbol ?? "--",
+    changePercent: strongestSector?.percentChange ?? 0,
+  };
 
   return {
     bias,
     capitalFlow,
     score,
     topSector,
-    macro,
-    sectors,
-    scannerPriority,
-    summary,
+    macro: liveQuotes.map(quoteToMacro),
+    sectors: [],
+    scannerPriority: getScannerPriority(capitalFlow),
+    summary: buildSummary(bias, capitalFlow, score),
   };
 }
