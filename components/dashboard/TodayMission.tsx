@@ -1,14 +1,11 @@
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 
-const missions = [
-  "Check macro flow first",
-  "Scan semiconductor stocks",
-  "Watch NVDA, AMD, AVGO",
-  "Wait for volume confirmation",
-];
+type TodayMissionProps = {
+  missions: string[];
+};
 
-export default function TodayMission() {
+export default function TodayMission({ missions }: TodayMissionProps) {
   return (
     <Card className="p-5">
       <div className="mb-4 flex items-center justify-between">
