@@ -15,11 +15,8 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const symbol = searchParams.get("symbol")?.toUpperCase() || "QQQ";
 
-    const baseUrl =
-      process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
-        : "http://localhost:3000";
-
+    const requestUrl = new URL(req.url);
+    const baseUrl = requestUrl.origin;
     const response = await fetch(
       `${baseUrl}/api/candles?symbol=${encodeURIComponent(symbol)}&interval=5min`,
       {
