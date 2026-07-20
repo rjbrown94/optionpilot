@@ -362,6 +362,104 @@ function getTradeScore({
   };
 }
 
+function getVolumeStrength(relativeVolume: number) {
+  if (relativeVolume >= 2) {
+    return {
+      label: "Very Strong",
+      textClass: "text-green-400",
+      panelClass: "border-green-500/30 bg-green-500/10",
+    };
+  }
+
+  if (relativeVolume >= 1.5) {
+    return {
+      label: "Strong",
+      textClass: "text-emerald-400",
+      panelClass: "border-emerald-500/30 bg-emerald-500/10",
+    };
+  }
+
+  if (relativeVolume >= 1.2) {
+    return {
+      label: "Above Average",
+      textClass: "text-emerald-300",
+      panelClass: "border-emerald-400/20 bg-emerald-400/10",
+    };
+  }
+
+  if (relativeVolume >= 1) {
+    return {
+      label: "Average",
+      textClass: "text-yellow-400",
+      panelClass: "border-yellow-500/30 bg-yellow-500/10",
+    };
+  }
+
+  return {
+    label: "Weak",
+    textClass: "text-red-400",
+    panelClass: "border-red-500/30 bg-red-500/10",
+  };
+}
+
+function getVolumeSummary(relativeVolume: number, trend: string) {
+  if (relativeVolume >= 2) {
+    return {
+      title: "Unusual volume expansion",
+      message:
+        trend === "bullish"
+          ? "Trading activity is extremely elevated while price is bullish. The move has strong participation, but avoid chasing an extended candle."
+          : trend === "bearish"
+            ? "Trading activity is extremely elevated while price is bearish. Downside participation is strong, but wait for a clean entry instead of chasing."
+            : "Trading activity is extremely elevated. Wait for price direction and VWAP confirmation before entering.",
+      textClass: "text-green-400",
+      panelClass: "border-green-500/30 bg-green-500/10",
+    };
+  }
+
+  if (relativeVolume >= 1.5) {
+    return {
+      title: "Strong volume confirmation",
+      message:
+        trend === "bullish"
+          ? "Volume is well above average and supports the bullish move. Continue checking VWAP, market structure, and the final trade signal."
+          : trend === "bearish"
+            ? "Volume is well above average and supports the bearish move. Continue checking VWAP, structure, and the final trade signal."
+            : "Volume is strong, but price direction is still mixed. Wait for the chart to confirm.",
+      textClass: "text-emerald-400",
+      panelClass: "border-emerald-500/30 bg-emerald-500/10",
+    };
+  }
+
+  if (relativeVolume >= 1.2) {
+    return {
+      title: "Above-average participation",
+      message:
+        "Volume is above normal and provides some confirmation. The setup still needs VWAP, EMA, and market-structure alignment.",
+      textClass: "text-emerald-300",
+      panelClass: "border-emerald-400/20 bg-emerald-400/10",
+    };
+  }
+
+  if (relativeVolume >= 1) {
+    return {
+      title: "Average participation",
+      message:
+        "Volume is near its normal level. The trade may develop, but there is not yet a strong volume advantage.",
+      textClass: "text-yellow-400",
+      panelClass: "border-yellow-500/30 bg-yellow-500/10",
+    };
+  }
+
+  return {
+    title: "Weak participation",
+    message:
+      "Volume is below average. Wait for volume expansion before treating the move as fully confirmed.",
+    textClass: "text-red-400",
+    panelClass: "border-red-500/30 bg-red-500/10",
+  };
+}
+
 export default function ScannerPage() {
   const searchParams = useSearchParams();
   const urlSymbol = searchParams.get("symbol") || "AAPL";
@@ -435,6 +533,24 @@ export default function ScannerPage() {
   const chartAnalysis = getChartAnalysis(candles);
   const displayCandles = candles.slice(-45);
 
+  const latestCandleVolume =
+    displayCandles.length > 0
+      ? displayCandles[displayCandles.length - 1].volume
+      : 0;
+
+  const averageCandleVolume =
+    displayCandles.length > 0
+      ? displayCandles.reduce((total, candle) => total + candle.volume, 0) /
+        displayCandles.length
+      : 0;
+
+  const calculatedRelativeVolume =
+    averageCandleVolume > 0 ? latestCandleVolume / averageCandleVolume : 0;
+
+  const relativeVolumeValue = hasNumber(stock?.relativeVolume)
+    ? stock!.relativeVolume!
+    : calculatedRelativeVolume;
+
   const finalAnalysis = {
     ...chartAnalysis,
     trend: stock?.trend ? stock.trend.toLowerCase() : chartAnalysis.trend,
@@ -478,6 +594,9 @@ export default function ScannerPage() {
         ? "bullish"
         : "bearish"
       : finalAnalysis.trend;
+
+  const volumeStrength = getVolumeStrength(relativeVolumeValue);
+  const volumeSummary = getVolumeSummary(relativeVolumeValue, trend);
 
   const tradeScore = getTradeScore({
     trend,
@@ -684,103 +803,108 @@ export default function ScannerPage() {
             <>
               <TradingViewChart symbol={ticker} />
 
-              <div className="mb-8 border border-zinc-800 rounded-2xl p-4 bg-black">
-                <h3 className="text-2xl font-bold mt-8 mb-4">
-                  Volume Confirmation
-                </h3>
+              <div className="mb-8 rounded-2xl border border-zinc-800 bg-black p-5">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h3 className="text-2xl font-bold text-white">
+                      Volume Confirmation
+                    </h3>
 
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div className="bg-zinc-900 rounded-xl p-5">
-                    <p className="text-zinc-400 text-sm">
-                      Current 5-Min Volume
+                    <p className="mt-1 text-sm text-zinc-500">
+                      Current activity compared with the recent candle average
+                    </p>
+                  </div>
+
+                  <span
+                    className={`w-fit rounded-full border px-3 py-1 text-sm font-bold ${volumeStrength.panelClass} ${volumeStrength.textClass}`}
+                  >
+                    {volumeStrength.label}
+                  </span>
+                </div>
+
+                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                  <div className="rounded-xl bg-zinc-900 p-5">
+                    <p className="text-sm text-zinc-400">
+                      Latest Candle Volume
                     </p>
 
-                    <p className="text-3xl font-bold mt-2">
-                      {displayCandles.length > 0
-                        ? `${(
-                            displayCandles[displayCandles.length - 1].volume /
-                            1000000
-                          ).toFixed(2)}M`
+                    <p className="mt-2 text-3xl font-bold text-white">
+                      {latestCandleVolume > 0
+                        ? `${(latestCandleVolume / 1_000_000).toFixed(2)}M`
                         : "--"}
                     </p>
                   </div>
 
-                  <div className="bg-zinc-900 rounded-xl p-5">
-                    <p className="text-zinc-400 text-sm">
-                      Average 5-Min Volume
+                  <div className="rounded-xl bg-zinc-900 p-5">
+                    <p className="text-sm text-zinc-400">
+                      Average Candle Volume
                     </p>
 
-                    <p className="text-3xl font-bold mt-2">
-                      {displayCandles.length > 0
-                        ? `${(
-                            displayCandles.reduce(
-                              (sum, candle) => sum + candle.volume,
-                              0,
-                            ) /
-                            displayCandles.length /
-                            1000000
-                          ).toFixed(2)}M`
+                    <p className="mt-2 text-3xl font-bold text-white">
+                      {averageCandleVolume > 0
+                        ? `${(averageCandleVolume / 1_000_000).toFixed(2)}M`
                         : "--"}
                     </p>
                   </div>
 
-                  <div className="bg-zinc-900 rounded-xl p-5">
-                    <p className="text-zinc-400 text-sm">Relative Volume</p>
-
-                    <p className="text-3xl font-bold mt-2">
-                      {stock?.relativeVolume
-                        ? `${(stock.relativeVolume * 100).toFixed(0)}%`
-                        : "--"}
-                    </p>
-                  </div>
-
-                  <div className="bg-zinc-900 rounded-xl p-5">
-                    <p className="text-zinc-400 text-sm">Participation</p>
+                  <div className="rounded-xl bg-zinc-900 p-5">
+                    <p className="text-sm text-zinc-400">Relative Volume</p>
 
                     <p
-                      className={`text-2xl font-bold mt-2 ${
-                        (stock?.relativeVolume ?? 0) >= 2
-                          ? "text-green-400"
-                          : (stock?.relativeVolume ?? 0) >= 1.5
-                            ? "text-green-300"
-                            : (stock?.relativeVolume ?? 0) >= 1.2
-                              ? "text-emerald-300"
-                              : (stock?.relativeVolume ?? 0) >= 1
-                                ? "text-yellow-400"
-                                : "text-red-400"
-                      }`}
+                      className={`mt-2 text-3xl font-bold ${volumeStrength.textClass}`}
                     >
-                      {(stock?.relativeVolume ?? 0) >= 2
-                        ? "Extremely Strong"
-                        : (stock?.relativeVolume ?? 0) >= 1.5
-                          ? "Strong"
-                          : (stock?.relativeVolume ?? 0) >= 1.2
-                            ? "Above Average"
-                            : (stock?.relativeVolume ?? 0) >= 1
-                              ? "Average"
-                              : "Weak"}
+                      {(relativeVolumeValue * 100).toFixed(0)}%
+                    </p>
+                  </div>
+
+                  <div
+                    className={`rounded-xl border p-5 ${volumeStrength.panelClass}`}
+                  >
+                    <p className="text-sm text-zinc-400">Volume Strength</p>
+
+                    <p
+                      className={`mt-2 text-2xl font-bold ${volumeStrength.textClass}`}
+                    >
+                      {volumeStrength.label}
                     </p>
                   </div>
                 </div>
 
-                <h3 className="text-2xl font-bold mt-8 mb-4">Volume</h3>
+                <div
+                  className={`mt-5 rounded-xl border p-5 ${volumeSummary.panelClass}`}
+                >
+                  <p className={`font-bold ${volumeSummary.textClass}`}>
+                    {volumeSummary.title}
+                  </p>
+
+                  <p className="mt-2 text-sm leading-6 text-zinc-300">
+                    {volumeSummary.message}
+                  </p>
+                </div>
+
+                <h3 className="mt-8 mb-4 text-2xl font-bold text-white">
+                  Volume History
+                </h3>
 
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={displayCandles}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="time" />
+
                       <YAxis
                         tickFormatter={(value) =>
-                          `${(Number(value) / 1000000).toFixed(1)}M`
+                          `${(Number(value) / 1_000_000).toFixed(1)}M`
                         }
                       />
+
                       <Tooltip
                         formatter={(value) => [
-                          `${(Number(value) / 1000000).toFixed(2)}M`,
+                          `${(Number(value) / 1_000_000).toFixed(2)}M`,
                           "Volume",
                         ]}
                       />
+
                       <Bar
                         dataKey="volume"
                         fill="#22c55e"
