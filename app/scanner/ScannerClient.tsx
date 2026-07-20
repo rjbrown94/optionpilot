@@ -685,24 +685,82 @@ export default function ScannerPage() {
               <TradingViewChart symbol={ticker} />
 
               <div className="mb-8 border border-zinc-800 rounded-2xl p-4 bg-black">
-                <h3 className="text-2xl font-bold mb-4">Price Chart</h3>
+                <h3 className="text-2xl font-bold mt-8 mb-4">
+                  Volume Confirmation
+                </h3>
 
-                <div className="h-80">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={displayCandles}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="time" />
-                      <YAxis domain={["auto", "auto"]} />
-                      <Tooltip />
-                      <Line
-                        type="monotone"
-                        dataKey="close"
-                        stroke="#22c55e"
-                        strokeWidth={3}
-                        dot={false}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="bg-zinc-900 rounded-xl p-5">
+                    <p className="text-zinc-400 text-sm">
+                      Current 5-Min Volume
+                    </p>
+
+                    <p className="text-3xl font-bold mt-2">
+                      {displayCandles.length > 0
+                        ? `${(
+                            displayCandles[displayCandles.length - 1].volume /
+                            1000000
+                          ).toFixed(2)}M`
+                        : "--"}
+                    </p>
+                  </div>
+
+                  <div className="bg-zinc-900 rounded-xl p-5">
+                    <p className="text-zinc-400 text-sm">
+                      Average 5-Min Volume
+                    </p>
+
+                    <p className="text-3xl font-bold mt-2">
+                      {displayCandles.length > 0
+                        ? `${(
+                            displayCandles.reduce(
+                              (sum, candle) => sum + candle.volume,
+                              0,
+                            ) /
+                            displayCandles.length /
+                            1000000
+                          ).toFixed(2)}M`
+                        : "--"}
+                    </p>
+                  </div>
+
+                  <div className="bg-zinc-900 rounded-xl p-5">
+                    <p className="text-zinc-400 text-sm">Relative Volume</p>
+
+                    <p className="text-3xl font-bold mt-2">
+                      {stock?.relativeVolume
+                        ? `${(stock.relativeVolume * 100).toFixed(0)}%`
+                        : "--"}
+                    </p>
+                  </div>
+
+                  <div className="bg-zinc-900 rounded-xl p-5">
+                    <p className="text-zinc-400 text-sm">Participation</p>
+
+                    <p
+                      className={`text-2xl font-bold mt-2 ${
+                        (stock?.relativeVolume ?? 0) >= 2
+                          ? "text-green-400"
+                          : (stock?.relativeVolume ?? 0) >= 1.5
+                            ? "text-green-300"
+                            : (stock?.relativeVolume ?? 0) >= 1.2
+                              ? "text-emerald-300"
+                              : (stock?.relativeVolume ?? 0) >= 1
+                                ? "text-yellow-400"
+                                : "text-red-400"
+                      }`}
+                    >
+                      {(stock?.relativeVolume ?? 0) >= 2
+                        ? "Extremely Strong"
+                        : (stock?.relativeVolume ?? 0) >= 1.5
+                          ? "Strong"
+                          : (stock?.relativeVolume ?? 0) >= 1.2
+                            ? "Above Average"
+                            : (stock?.relativeVolume ?? 0) >= 1
+                              ? "Average"
+                              : "Weak"}
+                    </p>
+                  </div>
                 </div>
 
                 <h3 className="text-2xl font-bold mt-8 mb-4">Volume</h3>
