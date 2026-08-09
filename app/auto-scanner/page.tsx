@@ -337,7 +337,7 @@ export default function AutoScannerPage() {
         )}
 
         <div className="overflow-x-auto rounded-2xl border border-zinc-800 bg-zinc-950">
-          <table className="w-full text-left min-w-[1200px]">
+          <table className="w-full text-left min-w-300">
             <thead className="bg-zinc-900 text-zinc-300">
               <tr>
                 <th className="p-4">Symbol</th>

@@ -1,281 +1,271 @@
 import { NextResponse } from "next/server";
-import { scanCandles, type Candle } from "@/libs/candleScanner";
 
-type TwelveDataCandle = {
-  datetime: string;
-  open: string;
-  high: string;
-  low: string;
-  close: string;
-  volume: string;
+type FinnhubQuote = {
+  c?: number;
+  d?: number;
+  dp?: number;
+  h?: number;
+  l?: number;
+  o?: number;
+  pc?: number;
+  t?: number;
+  error?: string;
 };
 
-function calculateEMA(values: number[], period: number) {
-  if (values.length < period) return null;
-
-  const multiplier = 2 / (period + 1);
-  let ema =
-    values.slice(0, period).reduce((sum, value) => sum + value, 0) / period;
-
-  for (let i = period; i < values.length; i++) {
-    ema = (values[i] - ema) * multiplier + ema;
-  }
-
-  return ema;
-}
-
-function calculateRSI(values: number[], period = 14) {
-  if (values.length <= period) return null;
-
-  let gains = 0;
-  let losses = 0;
-
-  for (let i = 1; i <= period; i++) {
-    const difference = values[i] - values[i - 1];
-
-    if (difference >= 0) {
-      gains += difference;
-    } else {
-      losses += Math.abs(difference);
-    }
-  }
-
-  let averageGain = gains / period;
-  let averageLoss = losses / period;
-
-  for (let i = period + 1; i < values.length; i++) {
-    const difference = values[i] - values[i - 1];
-    const gain = difference > 0 ? difference : 0;
-    const loss = difference < 0 ? Math.abs(difference) : 0;
-
-    averageGain = (averageGain * (period - 1) + gain) / period;
-    averageLoss = (averageLoss * (period - 1) + loss) / period;
-  }
-
-  if (averageLoss === 0) return 100;
-
-  const rs = averageGain / averageLoss;
-  return 100 - 100 / (1 + rs);
-}
-
-function calculateAverage(values: number[]) {
-  if (!values.length) return 0;
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
-function getSupport(candles: Candle[]) {
-  const recent = candles.slice(-20);
-  if (!recent.length) return null;
-
-  return Math.min(...recent.map((candle) => candle.low));
-}
-
-function getResistance(candles: Candle[]) {
-  const recent = candles.slice(-20);
-  if (!recent.length) return null;
-
-  return Math.max(...recent.map((candle) => candle.high));
-}
-
-function getMomentumScore({
-  price,
-  previousClose,
-  rsi,
-  ema20,
-  ema50,
-  relativeVolume,
-}: {
+type StockResult = {
+  symbol: string;
   price: number;
+  open: number;
+  high: number;
+  low: number;
   previousClose: number;
-  rsi: number | null;
-  ema20: number | null;
-  ema50: number | null;
+  change: number;
+  percentChange: number;
+
+  trend: "Bullish" | "Bearish" | "Neutral";
+  bestPlay: "CALLS" | "PUTS" | "WAIT";
+
+  rsi14: null;
+  ema20: null;
+  ema50: null;
+
+  volume: number;
+  averageVolume: number;
   relativeVolume: number;
-}) {
-  let score = 0;
 
-  if (price > previousClose) score += 20;
-  if (ema20 && price > ema20) score += 20;
-  if (ema20 && ema50 && ema20 > ema50) score += 20;
-  if (rsi && rsi >= 50 && rsi <= 70) score += 20;
-  if (relativeVolume >= 1.2) score += 20;
+  support: null;
+  resistance: null;
 
-  return Math.min(score, 100);
+  candlePattern: string;
+  candleDirection: "WAIT";
+  candleConfidence: number;
+
+  momentumScore: number;
+  setupQuality: string;
+  score: number;
+
+  updatedAt: string;
+  cached: boolean;
+  source: "finnhub";
+};
+
+type CacheItem = {
+  timestamp: number;
+  data: StockResult;
+};
+
+const CACHE_TIME_MS = 5 * 60 * 1000;
+const REQUEST_TIMEOUT_MS = 8_000;
+
+const quoteCache = new Map<string, CacheItem>();
+const inFlightRequests = new Map<string, Promise<StockResult>>();
+
+function cleanSymbol(value: string | null) {
+  return (value || "").trim().toUpperCase();
 }
 
-export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const symbol = searchParams.get("symbol")?.toUpperCase();
+function round(value: number, digits = 2) {
+  const multiplier = 10 ** digits;
+  return Math.round(value * multiplier) / multiplier;
+}
+
+function getTrend(price: number, previousClose: number): StockResult["trend"] {
+  if (price > previousClose) return "Bullish";
+  if (price < previousClose) return "Bearish";
+  return "Neutral";
+}
+
+function getBestPlay(trend: StockResult["trend"]): StockResult["bestPlay"] {
+  if (trend === "Bullish") return "CALLS";
+  if (trend === "Bearish") return "PUTS";
+  return "WAIT";
+}
+
+function getMomentumScore(percentChange: number) {
+  const move = Math.abs(percentChange);
+
+  if (move >= 5) return 70;
+  if (move >= 3) return 60;
+  if (move >= 2) return 50;
+  if (move >= 1) return 40;
+
+  return 25;
+}
+
+function getSetupQuality(score: number) {
+  if (score >= 80) return "Elite";
+  if (score >= 65) return "Strong";
+  if (score >= 50) return "Good";
+  return "Wait";
+}
+
+async function requestQuote(
+  symbol: string,
+  apiKey: string,
+): Promise<StockResult> {
+  const url = new URL("https://finnhub.io/api/v1/quote");
+
+  url.searchParams.set("symbol", symbol);
+  url.searchParams.set("token", apiKey);
+
+  const controller = new AbortController();
+
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(url.toString(), {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+
+    const text = await response.text();
+
+    let quote: FinnhubQuote;
+
+    try {
+      quote = JSON.parse(text) as FinnhubQuote;
+    } catch {
+      throw new Error("Finnhub returned invalid JSON.");
+    }
+
+    if (!response.ok || quote.error) {
+      throw new Error(
+        quote.error || `Finnhub returned HTTP ${response.status}.`,
+      );
+    }
+
+    const price = Number(quote.c ?? 0);
+    const previousClose = Number(quote.pc ?? 0);
+
+    if (price <= 0 || previousClose <= 0) {
+      throw new Error(`No valid quote returned for ${symbol}.`);
+    }
+
+    const change = Number.isFinite(Number(quote.d))
+      ? Number(quote.d)
+      : price - previousClose;
+
+    const percentChange = Number.isFinite(Number(quote.dp))
+      ? Number(quote.dp)
+      : (change / previousClose) * 100;
+
+    const trend = getTrend(price, previousClose);
+    const momentumScore = getMomentumScore(percentChange);
+
+    return {
+      symbol,
+      price: round(price),
+      open: round(Number(quote.o ?? 0)),
+      high: round(Number(quote.h ?? 0)),
+      low: round(Number(quote.l ?? 0)),
+      previousClose: round(previousClose),
+      change: round(change),
+      percentChange: round(percentChange),
+
+      trend,
+      bestPlay: getBestPlay(trend),
+
+      rsi14: null,
+      ema20: null,
+      ema50: null,
+
+      volume: 0,
+      averageVolume: 0,
+      relativeVolume: 0,
+
+      support: null,
+      resistance: null,
+
+      candlePattern: "Calculated from Massive candles",
+      candleDirection: "WAIT",
+      candleConfidence: 0,
+
+      momentumScore,
+      setupQuality: getSetupQuality(momentumScore),
+      score: momentumScore,
+
+      updatedAt: new Date().toISOString(),
+      cached: false,
+      source: "finnhub",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export async function GET(request: Request) {
+  const requestUrl = new URL(request.url);
+  const symbol = cleanSymbol(requestUrl.searchParams.get("symbol"));
+  const forceRefresh = requestUrl.searchParams.get("refresh") === "1";
 
   if (!symbol) {
     return NextResponse.json(
-      { error: "Missing stock symbol" },
+      { error: "Missing stock symbol." },
       { status: 400 },
     );
   }
 
-  const finnhubKey = process.env.FINNHUB_API_KEY;
-  const twelveDataKey = process.env.TWELVE_DATA_API_KEY;
+  const cached = quoteCache.get(symbol);
 
-  if (!finnhubKey) {
+  if (
+    !forceRefresh &&
+    cached &&
+    Date.now() - cached.timestamp < CACHE_TIME_MS
+  ) {
+    return NextResponse.json({
+      ...cached.data,
+      cached: true,
+    });
+  }
+
+  const apiKey = process.env.FINNHUB_API_KEY;
+
+  if (!apiKey) {
     return NextResponse.json(
-      { error: "Missing FINNHUB_API_KEY in .env.local" },
+      { error: "FINNHUB_API_KEY is missing from .env.local." },
       { status: 500 },
     );
   }
 
   try {
-    const quoteResponse = await fetch(
-      `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${finnhubKey}`,
-      { next: { revalidate: 30 } },
-    );
+    let pending = inFlightRequests.get(symbol);
 
-    if (!quoteResponse.ok) {
-      return NextResponse.json(
-        { error: "Failed to fetch stock quote" },
-        { status: 500 },
-      );
+    if (!pending) {
+      pending = requestQuote(symbol, apiKey);
+      inFlightRequests.set(symbol, pending);
     }
 
-    const quote = await quoteResponse.json();
+    const result = await pending;
 
-    const price = Number(quote.c || 0);
-    const open = Number(quote.o || 0);
-    const high = Number(quote.h || 0);
-    const low = Number(quote.l || 0);
-    const previousClose = Number(quote.pc || 0);
-    const change = Number(quote.d || 0);
-    const percentChange = Number(quote.dp || 0);
-
-    let rsi14: number | null = null;
-    let ema20: number | null = null;
-    let ema50: number | null = null;
-    let volume = 0;
-    let averageVolume = 0;
-    let relativeVolume = 0;
-    let support: number | null = null;
-    let resistance: number | null = null;
-    let candlePattern = "Unknown";
-    let candleDirection = "WAIT";
-    let candleConfidence = 0;
-
-    if (twelveDataKey) {
-      const candleResponse = await fetch(
-        `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=1day&outputsize=120&apikey=${twelveDataKey}`,
-        { next: { revalidate: 60 } },
-      );
-
-      const candleData = await candleResponse.json();
-
-      if (candleData.values) {
-        const candles: Candle[] = candleData.values
-          .map((candle: TwelveDataCandle): Candle => {
-            return {
-              time: candle.datetime,
-              open: Number(candle.open),
-              high: Number(candle.high),
-              low: Number(candle.low),
-              close: Number(candle.close),
-              volume: Number(candle.volume),
-            };
-          })
-          .reverse();
-
-        const closes = candles.map((candle) => candle.close);
-        const volumes = candles.map((candle) => candle.volume);
-
-        rsi14 = calculateRSI(closes, 14);
-        ema20 = calculateEMA(closes, 20);
-        ema50 = calculateEMA(closes, 50);
-
-        volume = volumes[volumes.length - 1] || 0;
-        averageVolume = calculateAverage(volumes.slice(-20));
-        relativeVolume = averageVolume > 0 ? volume / averageVolume : 0;
-
-        support = getSupport(candles);
-        resistance = getResistance(candles);
-
-        const candleScan = scanCandles(candles);
-        candlePattern = candleScan.candle;
-        candleDirection = candleScan.direction;
-        candleConfidence = candleScan.confidence;
-      }
-    }
-
-    const trend =
-      ema20 && ema50
-        ? ema20 > ema50
-          ? "Bullish"
-          : "Bearish"
-        : price >= previousClose
-          ? "Bullish"
-          : "Bearish";
-
-    const bestPlay =
-      candleDirection !== "WAIT"
-        ? candleDirection
-        : trend === "Bullish"
-          ? "CALLS"
-          : "PUTS";
-
-    const momentumScore = getMomentumScore({
-      price,
-      previousClose,
-      rsi: rsi14,
-      ema20,
-      ema50,
-      relativeVolume,
+    quoteCache.set(symbol, {
+      timestamp: Date.now(),
+      data: result,
     });
 
-    const setupQuality =
-      momentumScore >= 80
-        ? "Elite"
-        : momentumScore >= 65
-          ? "Strong"
-          : momentumScore >= 50
-            ? "Good"
-            : "Wait";
-
-    return NextResponse.json({
-      symbol,
-      price,
-      open,
-      high,
-      low,
-      previousClose,
-      change,
-      percentChange,
-
-      trend,
-      bestPlay,
-
-      rsi14,
-      ema20,
-      ema50,
-
-      volume,
-      averageVolume,
-      relativeVolume,
-
-      support,
-      resistance,
-
-      candlePattern,
-      candleDirection,
-      candleConfidence,
-
-      momentumScore,
-      setupQuality,
-
-      score: momentumScore,
-    });
+    return NextResponse.json(result);
   } catch (error) {
+    if (cached) {
+      return NextResponse.json({
+        ...cached.data,
+        cached: true,
+        warning:
+          error instanceof Error
+            ? error.message
+            : "Live quote failed. Using cached quote.",
+      });
+    }
+
     return NextResponse.json(
       {
-        error: "Failed to fetch stock data",
-        message: error instanceof Error ? error.message : "Unknown error",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unable to load the live stock quote.",
+        symbol,
       },
-      { status: 500 },
+      { status: 502 },
     );
+  } finally {
+    inFlightRequests.delete(symbol);
   }
 }

@@ -3,6 +3,7 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { useTradeContext } from "@/components/providers/TradeContext";
 
 function money(value: number) {
   return `$${value.toFixed(2)}`;
@@ -10,31 +11,29 @@ function money(value: number) {
 
 function OptionDetailsContent() {
   const searchParams = useSearchParams();
+  const tradeContext = useTradeContext();
+  const saved = tradeContext.selectedContract;
 
-  const stock = searchParams.get("stock") || "SOFI";
-  const type = searchParams.get("type") || "CALL";
-  const strike = Number(searchParams.get("strike") || 16.5);
-  const premium = Number(searchParams.get("premium") || 0.34);
-  const expiration = searchParams.get("expiration") || "2026-06-12";
-  const stockPrice = Number(searchParams.get("stockPrice") || 16.03);
-  const volume = Number(searchParams.get("volume") || 0);
-  const openInterest = Number(searchParams.get("openInterest") || 0);
-  const score = Number(searchParams.get("score") || 0);
-
+  const stock =
+    saved?.stock || searchParams.get("stock") || tradeContext.symbol || "SOFI";
+  const type =
+    saved?.type || searchParams.get("type") || tradeContext.direction || "CALL";
+  const strike = saved?.strike ?? Number(searchParams.get("strike") || 0);
+  const premium = saved?.premium ?? Number(searchParams.get("premium") || 0);
+  const expiration =
+    saved?.expiration || searchParams.get("expiration") || "--";
+  const stockPrice =
+    saved?.stockPrice ?? Number(searchParams.get("stockPrice") || 0);
+  const volume = saved?.volume ?? Number(searchParams.get("volume") || 0);
+  const openInterest =
+    saved?.openInterest ?? Number(searchParams.get("openInterest") || 0);
+  const score = saved?.score ?? Number(searchParams.get("score") || 0);
   const contractCost = premium * 100;
   const breakeven =
-    type.toUpperCase() === "CALL" ? strike + premium : strike - premium;
-
+    saved?.breakEvenPrice ??
+    (type === "CALL" ? strike + premium : strike - premium);
   const distanceToBreakeven =
     stockPrice > 0 ? ((breakeven - stockPrice) / stockPrice) * 100 : 0;
-
-  const riskLabel =
-    premium <= 0.5
-      ? "Low Cost"
-      : premium <= 1.5
-        ? "Moderate Cost"
-        : "Higher Cost";
-
   const liquidityLabel =
     volume >= 5000 && openInterest >= 5000
       ? "Strong Liquidity"
@@ -43,121 +42,116 @@ function OptionDetailsContent() {
         : "Weak Liquidity";
 
   return (
-    <main className="min-h-screen bg-black text-white p-8">
-      <div className="max-w-7xl mx-auto">
+    <main className="min-h-screen bg-black p-8 text-white">
+      <div className="mx-auto max-w-7xl">
         <div className="mb-8">
-          <Link href="/cheap-options" className="text-green-400 font-bold">
-            ← Back to Cheap Options
+          <Link href="/cheap-options" className="font-bold text-green-400">
+            ← Back to AI Contract Selector
           </Link>
-
-          <h1 className="text-5xl font-bold mt-6">Option Details</h1>
-
-          <p className="text-zinc-400 mt-2">
-            Review contract cost, breakeven, risk, liquidity, and setup quality
-            before trading.
+          <h1 className="mt-6 text-5xl font-bold">Option Details</h1>
+          <p className="mt-2 text-zinc-400">
+            Final contract review before placing the trade.
           </p>
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+        <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
+          <p className="text-xs font-bold uppercase tracking-wide text-emerald-400">
+            Connected Trade Workflow
+          </p>
+          <div className="mt-3 flex flex-wrap gap-4 text-sm">
+            <span>
+              Symbol: <strong>{stock}</strong>
+            </span>
+            <span>
+              Direction: <strong>{type}</strong>
+            </span>
+            <span>
+              Strategy:{" "}
+              <strong className="capitalize">{tradeContext.strategy}</strong>
+            </span>
+            <span>
+              Scanner:{" "}
+              <strong>{tradeContext.scannerStatus || "Not checked"}</strong>
+            </span>
+          </div>
+        </section>
+
+        <div className="grid gap-6 lg:grid-cols-3">
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 lg:col-span-2">
             <div className="flex justify-between gap-4">
               <div>
                 <p className="text-zinc-400">Contract</p>
-                <h2 className="text-4xl font-bold mt-2">{stock}</h2>
-
+                <h2 className="mt-2 text-4xl font-bold">{stock}</h2>
                 <p
-                  className={
-                    type.toUpperCase() === "CALL"
-                      ? "text-green-400 font-bold text-xl mt-3"
-                      : "text-red-400 font-bold text-xl mt-3"
-                  }
+                  className={`mt-3 text-xl font-bold ${type === "CALL" ? "text-green-400" : "text-red-400"}`}
                 >
-                  {type.toUpperCase()} · {money(strike)} Strike
+                  {type} · {money(strike)} Strike
                 </p>
-
-                <p className="text-zinc-400 mt-2">Expires: {expiration}</p>
+                <p className="mt-2 text-zinc-400">Expires: {expiration}</p>
               </div>
-
               <div className="text-right">
                 <p className="text-zinc-400">Premium</p>
-                <p className="text-4xl font-bold text-green-400 mt-2">
+                <p className="mt-2 text-4xl font-bold text-green-400">
                   {money(premium)}
                 </p>
-                <p className="text-zinc-400 mt-2">
+                <p className="mt-2 text-zinc-400">
                   Cost: {money(contractCost)}
                 </p>
               </div>
             </div>
 
-            <div className="grid md:grid-cols-2 gap-4 mt-8">
-              <div className="bg-black rounded-xl p-5">
-                <p className="text-zinc-500">Stock Price</p>
-                <p className="text-2xl font-bold">{money(stockPrice)}</p>
-              </div>
-
-              <div className="bg-black rounded-xl p-5">
-                <p className="text-zinc-500">Breakeven Price</p>
-                <p className="text-2xl font-bold">{money(breakeven)}</p>
-              </div>
-
-              <div className="bg-black rounded-xl p-5">
-                <p className="text-zinc-500">Move Needed</p>
-                <p className="text-2xl font-bold">
-                  {distanceToBreakeven.toFixed(2)}%
-                </p>
-              </div>
-
-              <div className="bg-black rounded-xl p-5">
-                <p className="text-zinc-500">Risk</p>
-                <p className="text-2xl font-bold">{riskLabel}</p>
-              </div>
-
-              <div className="bg-black rounded-xl p-5">
-                <p className="text-zinc-500">Volume</p>
-                <p className="text-2xl font-bold">{volume.toLocaleString()}</p>
-              </div>
-
-              <div className="bg-black rounded-xl p-5">
-                <p className="text-zinc-500">Open Interest</p>
-                <p className="text-2xl font-bold">
-                  {openInterest.toLocaleString()}
-                </p>
-              </div>
+            <div className="mt-8 grid gap-4 md:grid-cols-2">
+              {[
+                ["Stock Price", money(stockPrice)],
+                ["Breakeven Price", money(breakeven)],
+                ["Move Needed", `${distanceToBreakeven.toFixed(2)}%`],
+                ["Volume", volume.toLocaleString()],
+                ["Open Interest", openInterest.toLocaleString()],
+                ["Liquidity", liquidityLabel],
+                ["Delta", saved?.delta?.toFixed(2) ?? "--"],
+                [
+                  "IV",
+                  saved?.impliedVolatility
+                    ? `${(saved.impliedVolatility * 100).toFixed(1)}%`
+                    : "--",
+                ],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-xl bg-black p-5">
+                  <p className="text-zinc-500">{label}</p>
+                  <p className="text-2xl font-bold">{value}</p>
+                </div>
+              ))}
             </div>
           </div>
 
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
-            <p className="text-zinc-400">Opportunity Score</p>
-            <p className="text-5xl font-bold text-yellow-400 mt-3">
+          <aside className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+            <p className="text-zinc-400">Contract Score</p>
+            <p className="mt-3 text-5xl font-bold text-yellow-400">
               {score}/100
             </p>
-
             <div className="mt-8 space-y-4">
-              <div className="bg-black rounded-xl p-4">
-                <p className="text-zinc-500">Liquidity</p>
-                <p className="text-xl font-bold">{liquidityLabel}</p>
-              </div>
-
-              <div className="bg-black rounded-xl p-4">
+              <div className="rounded-xl bg-black p-4">
                 <p className="text-zinc-500">Max Risk</p>
                 <p className="text-xl font-bold">{money(contractCost)}</p>
               </div>
-
-              <div className="bg-black rounded-xl p-4">
-                <p className="text-zinc-500">Max Gain</p>
+              <div className="rounded-xl bg-black p-4">
+                <p className="text-zinc-500">Scanner Result</p>
                 <p className="text-xl font-bold">
-                  {type.toUpperCase() === "CALL" ? "Unlimited" : "Limited"}
+                  {tradeContext.scannerStatus || "Not checked"}
                 </p>
               </div>
+              <div className="rounded-xl bg-black p-4">
+                <p className="text-zinc-500">Flow Direction</p>
+                <p className="text-xl font-bold">{tradeContext.direction}</p>
+              </div>
             </div>
-
             <Link
-              href={`/scanner?symbol=${stock}`}
-              className="block text-center bg-green-500 text-black font-bold rounded-xl px-5 py-3 mt-8"
+              href={`/scanner?symbol=${encodeURIComponent(stock)}`}
+              className="mt-8 block rounded-xl bg-white px-5 py-3 text-center font-bold text-black"
             >
-              Open Full Scanner
+              Return to Scanner
             </Link>
-          </div>
+          </aside>
         </div>
       </div>
     </main>
@@ -168,7 +162,7 @@ export default function OptionDetailsPage() {
   return (
     <Suspense
       fallback={
-        <main className="min-h-screen bg-black text-white p-8">
+        <main className="min-h-screen bg-black p-8 text-white">
           Loading option details...
         </main>
       }

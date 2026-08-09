@@ -1,6 +1,7 @@
 import React from "react";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
+import { TradeProvider } from "@/components/providers/TradeContext";
 
 export const metadata = {
   title: "OptionPilot",
@@ -19,8 +20,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="bg-black text-white">
-        <Navbar />
-        {children}
+        <TradeProvider>
+          <Navbar />
+          {children}
+        </TradeProvider>
       </body>
     </html>
   );
