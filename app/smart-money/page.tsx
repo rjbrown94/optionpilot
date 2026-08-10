@@ -8,67 +8,112 @@ import MetricCard from "@/components/ui/MetricCard";
 import SectionHeader from "@/components/ui/SectionHeader";
 
 type ConnectionStatus = "connecting" | "connected" | "error" | "closed";
+
 type InstitutionalSide = "ASK" | "BID" | "MID" | "UNKNOWN";
 
 type SmartMoneyTrade = {
   id: string;
+
   contractSymbol: string;
+
   underlying: string;
+
   direction: "CALLS" | "PUTS";
+
   strike: number | null;
+
   expiration: string | null;
+
   price: number;
+
   size: number;
+
   premium: number;
+
   timestamp: number;
+
   side: InstitutionalSide;
+
   bidPrice: number | null;
+
   bidSize: number | null;
+
   askPrice: number | null;
+
   askSize: number | null;
+
   spreadPercent: number | null;
+
   classification: "SWEEP_LIKE" | "BLOCK" | "LARGE_PREMIUM" | "STANDARD";
+
   labels: string[];
+
   confidence: number;
 };
 
 type AggregatedFlow = {
   symbol: string;
+
   direction: "CALLS" | "PUTS";
+
   premium: number;
+
   tradePrice: number;
+
   volume: number;
+
   confidence: number;
+
   contractSymbol: string;
+
   strike: number | null;
+
   expiration: string | null;
+
   timestamp: number;
+
   side: InstitutionalSide;
+
   bidPrice: number | null;
+
   bidSize: number | null;
+
   askPrice: number | null;
+
   askSize: number | null;
+
   spreadPercent: number | null;
+
   classification: SmartMoneyTrade["classification"];
+
   labels: string[];
 };
 
 const MAX_TRADES = 500;
+
 const MINIMUM_PREMIUM = 10_000;
 
 function formatCompactCurrency(value: number): string {
-  if (!Number.isFinite(value)) return "$0";
+  if (!Number.isFinite(value)) {
+    return "$0";
+  }
+
   const absoluteValue = Math.abs(value);
+
   const sign = value < 0 ? "-" : "";
+
   if (absoluteValue >= 1_000_000_000) {
     return `${sign}$${(absoluteValue / 1_000_000_000).toFixed(1)}B`;
   }
+
   if (absoluteValue >= 1_000_000) {
     return `${sign}$${(absoluteValue / 1_000_000).toFixed(1)}M`;
   }
+
   if (absoluteValue >= 1_000) {
     return `${sign}$${(absoluteValue / 1_000).toFixed(1)}K`;
   }
+
   return `${sign}$${absoluteValue.toFixed(0)}`;
 }
 
@@ -76,43 +121,93 @@ function getStatusClasses(status: ConnectionStatus): string {
   if (status === "connected") {
     return "border-emerald-700 bg-emerald-950/50 text-emerald-300";
   }
+
   if (status === "error") {
     return "border-red-700 bg-red-950/50 text-red-300";
   }
+
   return "border-yellow-700 bg-yellow-950/50 text-yellow-300";
 }
 
 function getStatusLabel(status: ConnectionStatus): string {
-  if (status === "connected") return "LIVE OPTIONS STREAM";
-  if (status === "error") return "RECONNECTING";
-  if (status === "closed") return "STREAM CLOSED";
+  if (status === "connected") {
+    return "LIVE OPTIONS STREAM";
+  }
+
+  if (status === "error") {
+    return "RECONNECTING";
+  }
+
+  if (status === "closed") {
+    return "STREAM CLOSED";
+  }
+
   return "CONNECTING";
 }
 
 export default function SmartMoneyPage() {
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
+
   const [error, setError] = useState<string | null>(null);
+
   const [trades, setTrades] = useState<SmartMoneyTrade[]>([]);
 
   useEffect(() => {
     let source: EventSource | null = null;
+
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
     let stopped = false;
 
-    const connect = () => {
-      if (stopped) return;
+    function clearReconnectTimer() {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+
+        reconnectTimer = null;
+      }
+    }
+
+    function scheduleReconnect(delay = 3000) {
+      if (stopped) {
+        return;
+      }
+
+      clearReconnectTimer();
+
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+
+        connect();
+      }, delay);
+    }
+
+    function connect() {
+      if (stopped) {
+        return;
+      }
+
+      /*
+       * Make sure only one browser-side
+       * EventSource exists at a time.
+       */
+      source?.close();
+
+      source = null;
 
       setStatus("connecting");
-
-      source?.close();
 
       source = new EventSource("/api/smart-money-stream");
 
       source.addEventListener("ready", () => {
         setStatus("connected");
+
         setError(null);
       });
 
+      /*
+       * Massive WebSocket status events
+       * forwarded through our SSE route.
+       */
       source.addEventListener("status", (event) => {
         try {
           const payload = JSON.parse((event as MessageEvent).data) as {
@@ -122,17 +217,19 @@ export default function SmartMoneyPage() {
 
           if (payload.status === "auth_success") {
             setStatus("connected");
+
             setError(null);
           }
 
           if (payload.status === "auth_failed") {
             setStatus("error");
+
             setError(
               payload.message || "Massive options authentication failed.",
             );
           }
         } catch {
-          // Ignore malformed status events.
+          // Ignore malformed provider status events.
         }
       });
 
@@ -143,9 +240,11 @@ export default function SmartMoneyPage() {
           };
 
           setStatus("error");
+
           setError(payload.message || "The options stream reported an error.");
         } catch {
           setStatus("error");
+
           setError("The options stream reported an error.");
         }
       });
@@ -174,38 +273,60 @@ export default function SmartMoneyPage() {
         }
       });
 
+      /*
+       * The server intentionally sends this
+       * around 4m30s on Vercel Hobby.
+       */
+      source.addEventListener("reconnect", () => {
+        if (stopped) {
+          return;
+        }
+
+        setStatus("connecting");
+
+        setError(null);
+
+        source?.close();
+
+        source = null;
+
+        /*
+         * Give Massive a moment to release
+         * the previous WebSocket connection.
+         */
+        scheduleReconnect(1500);
+      });
+
+      /*
+       * Handles unexpected connection failures.
+       */
       source.onerror = () => {
         if (stopped) {
           return;
         }
 
         source?.close();
+
         source = null;
 
         setStatus("error");
+
         setError("The live options stream was interrupted. Reconnecting...");
 
-        if (reconnectTimer) {
-          clearTimeout(reconnectTimer);
-        }
-
-        reconnectTimer = setTimeout(() => {
-          reconnectTimer = null;
-          connect();
-        }, 3000);
+        scheduleReconnect(3000);
       };
-    };
+    }
 
     connect();
 
     return () => {
       stopped = true;
 
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer);
-      }
+      clearReconnectTimer();
 
       source?.close();
+
+      source = null;
     };
   }, []);
 
@@ -214,12 +335,19 @@ export default function SmartMoneyPage() {
       string,
       {
         callsPremium: number;
+
         putsPremium: number;
+
         callsVolume: number;
+
         putsVolume: number;
+
         latestCall: SmartMoneyTrade | null;
+
         latestPut: SmartMoneyTrade | null;
+
         bestCall: SmartMoneyTrade | null;
+
         bestPut: SmartMoneyTrade | null;
       }
     >();
@@ -227,24 +355,34 @@ export default function SmartMoneyPage() {
     for (const trade of trades) {
       const current = grouped.get(trade.underlying) ?? {
         callsPremium: 0,
+
         putsPremium: 0,
+
         callsVolume: 0,
+
         putsVolume: 0,
+
         latestCall: null,
+
         latestPut: null,
+
         bestCall: null,
+
         bestPut: null,
       };
 
       if (trade.direction === "CALLS") {
         current.callsPremium += trade.premium;
+
         current.callsVolume += trade.size;
+
         if (
           !current.latestCall ||
           trade.timestamp > current.latestCall.timestamp
         ) {
           current.latestCall = trade;
         }
+
         if (
           !current.bestCall ||
           trade.confidence > current.bestCall.confidence ||
@@ -255,13 +393,16 @@ export default function SmartMoneyPage() {
         }
       } else {
         current.putsPremium += trade.premium;
+
         current.putsVolume += trade.size;
+
         if (
           !current.latestPut ||
           trade.timestamp > current.latestPut.timestamp
         ) {
           current.latestPut = trade;
         }
+
         if (
           !current.bestPut ||
           trade.confidence > current.bestPut.confidence ||
@@ -278,33 +419,56 @@ export default function SmartMoneyPage() {
     return Array.from(grouped.entries())
       .map(([symbol, item]): AggregatedFlow | null => {
         const bullish = item.callsPremium >= item.putsPremium;
+
         const direction = bullish ? "CALLS" : "PUTS";
+
         const premium = bullish ? item.callsPremium : item.putsPremium;
+
         const volume = bullish ? item.callsVolume : item.putsVolume;
+
         const representativeTrade = bullish
           ? item.bestCall || item.latestCall
           : item.bestPut || item.latestPut;
 
-        if (!representativeTrade) return null;
+        if (!representativeTrade) {
+          return null;
+        }
 
         return {
           symbol,
+
           direction,
+
           premium,
+
           tradePrice: representativeTrade.price,
+
           volume,
+
           confidence: representativeTrade.confidence,
+
           contractSymbol: representativeTrade.contractSymbol,
+
           strike: representativeTrade.strike,
+
           expiration: representativeTrade.expiration,
+
           timestamp: representativeTrade.timestamp,
+
           side: representativeTrade.side,
+
           bidPrice: representativeTrade.bidPrice,
+
           bidSize: representativeTrade.bidSize,
+
           askPrice: representativeTrade.askPrice,
+
           askSize: representativeTrade.askSize,
+
           spreadPercent: representativeTrade.spreadPercent,
+
           classification: representativeTrade.classification,
+
           labels: representativeTrade.labels,
         };
       })
@@ -313,6 +477,7 @@ export default function SmartMoneyPage() {
         if (second.confidence !== first.confidence) {
           return second.confidence - first.confidence;
         }
+
         return second.premium - first.premium;
       })
       .slice(0, 20);
@@ -335,6 +500,7 @@ export default function SmartMoneyPage() {
   );
 
   const totalPremium = callPremium + putPremium;
+
   const callPutRatio =
     putPremium > 0
       ? callPremium / putPremium
@@ -350,9 +516,11 @@ export default function SmartMoneyPage() {
             <p className="text-sm font-bold uppercase tracking-[0.2em] text-emerald-400">
               OptionPilot Intelligence
             </p>
+
             <h1 className="mt-2 text-4xl font-bold md:text-5xl">
               Smart Money Radar
             </h1>
+
             <p className="mt-3 max-w-3xl text-zinc-400">
               Monitor real options trades from your Massive Options WebSocket
               and surface the contracts attracting the most premium.
@@ -376,6 +544,7 @@ export default function SmartMoneyPage() {
             badge="Calls"
             tone="bullish"
           />
+
           <MetricCard
             title="Bearish Premium"
             value={formatCompactCurrency(putPremium)}
@@ -383,6 +552,7 @@ export default function SmartMoneyPage() {
             badge="Puts"
             tone="bearish"
           />
+
           <MetricCard
             title="Call / Put Ratio"
             value={callPutRatio.toFixed(2)}
@@ -390,6 +560,7 @@ export default function SmartMoneyPage() {
             badge={callPutRatio >= 1 ? "Bullish" : "Bearish"}
             tone={callPutRatio >= 1 ? "bullish" : "bearish"}
           />
+
           <MetricCard
             title="Total Premium"
             value={formatCompactCurrency(totalPremium)}
@@ -402,6 +573,7 @@ export default function SmartMoneyPage() {
         {error && (
           <section className="mt-6 rounded-2xl border border-red-800 bg-red-950/40 p-5">
             <p className="font-bold text-red-300">Stream notice</p>
+
             <p className="mt-2 text-sm text-red-200">{error}</p>
           </section>
         )}
@@ -421,6 +593,7 @@ export default function SmartMoneyPage() {
               <p className="text-xl font-bold">
                 Waiting for qualifying option trades
               </p>
+
               <p className="mt-2 text-zinc-400">
                 Options activity is concentrated during regular market hours.
                 This page does not use placeholder trades.
@@ -445,7 +618,6 @@ export default function SmartMoneyPage() {
                   bid={item.bidPrice}
                   ask={item.askPrice}
                   side={item.side}
-                  classification={item.classification}
                   confidence={item.confidence}
                   timestamp={item.timestamp}
                 />
