@@ -31,6 +31,12 @@ type CandleResponse = {
   interval?: string;
   candles?: Candle[];
   cached?: boolean;
+  source?: string;
+
+  latestCandleTime?: string | null;
+  latestCandleAgeMinutes?: number | null;
+  stale?: boolean;
+
   warning?: string;
   error?: string;
 };
@@ -253,6 +259,14 @@ export default function ScannerClient() {
 
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
 
+  const [latestCandleTime, setLatestCandleTime] = useState<string | null>(null);
+
+  const [latestCandleAgeMinutes, setLatestCandleAgeMinutes] = useState<
+    number | null
+  >(null);
+
+  const [staleData, setStaleData] = useState(false);
+
   const mountedRef = useRef(false);
 
   const loadNews = useCallback(async (requestedSymbol: string) => {
@@ -341,10 +355,6 @@ export default function ScannerClient() {
         setWarning(null);
       }
 
-      /*
-       * News is context for the same symbol.
-       * It does not control the technical calculation.
-       */
       void loadNews(cleanSymbol);
 
       try {
@@ -397,6 +407,12 @@ export default function ScannerClient() {
 
           setWarning(payload.warning || null);
 
+          setLatestCandleTime(payload.latestCandleTime ?? null);
+
+          setLatestCandleAgeMinutes(payload.latestCandleAgeMinutes ?? null);
+
+          setStaleData(payload.stale === true);
+
           setUpdatedAt(new Date().toISOString());
         }
       } catch (caught) {
@@ -438,10 +454,6 @@ export default function ScannerClient() {
     };
   }, [querySymbol, loadConfirmation]);
 
-  /*
-   * Refresh technical confirmation once per minute.
-   * News is refreshed with the same scan request.
-   */
   useEffect(() => {
     const timer = window.setInterval(() => {
       void loadConfirmation(ticker);
@@ -470,10 +482,12 @@ export default function ScannerClient() {
     return calculateTradeConfirmation(ticker, confirmationCandles);
   }, [candles, ticker]);
 
-  const decision = useMemo(
+  const technicalDecision = useMemo(
     () => getDecision(confirmation, direction),
     [confirmation, direction],
   );
+
+  const decision: ScannerDecision = staleData ? "WAIT" : technicalDecision;
 
   const newsAlignment = useMemo(
     () => getNewsAlignment(topCatalyst, direction),
@@ -511,12 +525,6 @@ export default function ScannerClient() {
       ? Math.min(...candles.map((candle) => candle.low))
       : null;
 
-  /*
-   * Cheap Options already reads:
-   * symbol
-   * direction
-   * strategy
-   */
   const contractSelectorUrl = `/cheap-options?symbol=${encodeURIComponent(
     ticker,
   )}&direction=${encodeURIComponent(
@@ -599,6 +607,63 @@ export default function ScannerClient() {
         {!loading && !error && (
           <div className="space-y-6">
             <section
+              className={`rounded-2xl border p-5 ${
+                staleData
+                  ? "border-red-800 bg-red-950/30"
+                  : "border-emerald-800 bg-emerald-950/20"
+              }`}
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p
+                    className={`text-xs font-bold uppercase tracking-[0.16em] ${
+                      staleData ? "text-red-400" : "text-emerald-400"
+                    }`}
+                  >
+                    Market Data Status
+                  </p>
+
+                  <p
+                    className={`mt-2 text-xl font-bold ${
+                      staleData ? "text-red-300" : "text-emerald-300"
+                    }`}
+                  >
+                    {staleData ? "STALE DATA — DO NOT TRADE" : "LIVE DATA"}
+                  </p>
+
+                  <p className="mt-2 text-sm text-zinc-400">
+                    Latest 5-minute candle:{" "}
+                    {latestCandleTime
+                      ? new Date(latestCandleTime).toLocaleTimeString("en-US", {
+                          timeZone: "America/Chicago",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })
+                      : "--"}{" "}
+                    CT
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-black px-4 py-3">
+                  <p className="text-xs text-zinc-500">Candle Age</p>
+
+                  <p className="mt-1 text-lg font-bold">
+                    {latestCandleAgeMinutes !== null
+                      ? `${latestCandleAgeMinutes} min`
+                      : "--"}
+                  </p>
+                </div>
+              </div>
+
+              {staleData && (
+                <p className="mt-4 text-sm font-semibold text-red-200">
+                  OptionPilot has disabled technical confirmation until fresh
+                  market data returns.
+                </p>
+              )}
+            </section>
+
+            <section
               className={`rounded-2xl border p-6 ${getDecisionClasses(
                 decision,
               )}`}
@@ -613,7 +678,9 @@ export default function ScannerClient() {
 
                   <p className="mt-2">
                     Scanner Signal:{" "}
-                    <strong>{getDirectionLabel(confirmation)}</strong>
+                    <strong>
+                      {staleData ? "WAIT" : getDirectionLabel(confirmation)}
+                    </strong>
                   </p>
 
                   <p className="mt-1 text-sm opacity-80">
@@ -896,6 +963,13 @@ export default function ScannerClient() {
                         ⚠ {item}
                       </p>
                     ))}
+
+                    {staleData && (
+                      <p className="text-sm text-red-300">
+                        ⚠ Candle data is stale. Technical confirmation is
+                        disabled.
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -904,7 +978,14 @@ export default function ScannerClient() {
             <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
               <h2 className="text-2xl font-bold">What OptionPilot Says</h2>
 
-              {decision === "TRADE READY" && (
+              {staleData && (
+                <p className="mt-3 text-red-300">
+                  Market data is stale. OptionPilot has forced the scanner to
+                  WAIT until a fresh 5-minute candle is available.
+                </p>
+              )}
+
+              {!staleData && decision === "TRADE READY" && (
                 <p className="mt-3 text-emerald-300">
                   The 5-minute technical setup agrees with the current{" "}
                   {direction} flow. Review the news catalyst, then move to
@@ -912,21 +993,21 @@ export default function ScannerClient() {
                 </p>
               )}
 
-              {decision === "WATCH" && (
+              {!staleData && decision === "WATCH" && (
                 <p className="mt-3 text-yellow-300">
                   The direction is not fully confirmed yet. Keep watching VWAP,
                   market structure, EMA alignment, volume, and catalyst context.
                 </p>
               )}
 
-              {decision === "CONFLICT" && (
+              {!staleData && decision === "CONFLICT" && (
                 <p className="mt-3 text-red-300">
                   Smart Money direction and the technical chart currently
                   disagree. Do not enter until they align.
                 </p>
               )}
 
-              {decision === "WAIT" && (
+              {!staleData && decision === "WAIT" && (
                 <p className="mt-3 text-zinc-300">
                   OptionPilot does not have enough technical evidence yet.
                 </p>
@@ -943,7 +1024,7 @@ export default function ScannerClient() {
                 <Link
                   href={contractSelectorUrl}
                   className={`rounded-xl px-5 py-3 text-center font-bold ${
-                    decision === "TRADE READY"
+                    decision === "TRADE READY" && !staleData
                       ? "bg-emerald-500 text-black hover:bg-emerald-400"
                       : "bg-zinc-800 text-zinc-300"
                   }`}

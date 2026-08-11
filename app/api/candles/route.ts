@@ -14,7 +14,10 @@ type CandleResult = {
   interval: string;
   candles: Candle[];
   cached: boolean;
-  source: "massive";
+  source: "twelve-data";
+  latestCandleTime: string | null;
+  latestCandleAgeMinutes: number | null;
+  stale: boolean;
 };
 
 type CacheItem = {
@@ -22,28 +25,20 @@ type CacheItem = {
   data: CandleResult;
 };
 
-type MassiveBar = {
-  t?: number;
-  o?: number;
-  h?: number;
-  l?: number;
-  c?: number;
-  v?: number;
+type TwelveDataValue = {
+  datetime?: string;
+  open?: string;
+  high?: string;
+  low?: string;
+  close?: string;
+  volume?: string;
 };
 
-type MassiveResponse = {
+type TwelveDataResponse = {
   status?: string;
-  results?: MassiveBar[];
-  resultsCount?: number;
-  error?: string;
+  code?: number;
   message?: string;
-};
-
-type IntervalConfig = {
-  multiplier: number;
-  timespan: "minute" | "hour" | "day";
-  lookbackDays: number;
-  minimumCandles: number;
+  values?: TwelveDataValue[];
 };
 
 const candleCache = new Map<string, CacheItem>();
@@ -73,89 +68,42 @@ function normalizeInterval(interval: string | null): string {
   return allowedIntervals.has(requested) ? requested : "5min";
 }
 
-function getIntervalConfig(interval: string): IntervalConfig {
+function getOutputSize(interval: string): number {
   switch (interval) {
     case "1min":
-      return {
-        multiplier: 1,
-        timespan: "minute",
-        lookbackDays: 5,
-        minimumCandles: 25,
-      };
-
-    case "15min":
-      return {
-        multiplier: 15,
-        timespan: "minute",
-        lookbackDays: 10,
-        minimumCandles: 25,
-      };
-
-    case "30min":
-      return {
-        multiplier: 30,
-        timespan: "minute",
-        lookbackDays: 15,
-        minimumCandles: 25,
-      };
-
-    case "45min":
-      return {
-        multiplier: 45,
-        timespan: "minute",
-        lookbackDays: 20,
-        minimumCandles: 25,
-      };
-
-    case "1h":
-      return {
-        multiplier: 1,
-        timespan: "hour",
-        lookbackDays: 30,
-        minimumCandles: 25,
-      };
-
-    case "2h":
-      return {
-        multiplier: 2,
-        timespan: "hour",
-        lookbackDays: 45,
-        minimumCandles: 25,
-      };
-
-    case "4h":
-      return {
-        multiplier: 4,
-        timespan: "hour",
-        lookbackDays: 90,
-        minimumCandles: 25,
-      };
-
-    case "1day":
-      return {
-        multiplier: 1,
-        timespan: "day",
-        lookbackDays: 180,
-        minimumCandles: 25,
-      };
+      return 250;
 
     case "5min":
+      return 250;
+
+    case "15min":
+      return 250;
+
+    case "30min":
+      return 250;
+
+    case "45min":
+      return 250;
+
+    case "1h":
+      return 500;
+
+    case "2h":
+      return 500;
+
+    case "4h":
+      return 500;
+
+    case "1day":
+      return 300;
+
     default:
-      return {
-        multiplier: 5,
-        timespan: "minute",
-        lookbackDays: 7,
-        minimumCandles: 25,
-      };
+      return 250;
   }
 }
 
 function buildCacheKey(symbol: string, interval: string): string {
   return `${symbol}:${interval}`;
-}
-
-function formatDate(date: Date): string {
-  return date.toISOString().split("T")[0];
 }
 
 function isValidCandle(candle: Candle): boolean {
@@ -173,28 +121,131 @@ function isValidCandle(candle: Candle): boolean {
   );
 }
 
-function createMassiveUrl(input: {
-  symbol: string;
-  multiplier: number;
-  timespan: string;
-  from: string;
-  to: string;
-  apiKey: string;
-}) {
-  const { symbol, multiplier, timespan, from, to, apiKey } = input;
+function parseTwelveDataTime(datetime: string): Date | null {
+  if (!datetime) {
+    return null;
+  }
 
-  const url = new URL(
-    `https://api.massive.com/v2/aggs/ticker/${encodeURIComponent(
-      symbol,
-    )}/range/${multiplier}/${timespan}/${from}/${to}`,
+  const normalized = datetime.includes("T")
+    ? datetime
+    : datetime.replace(" ", "T");
+
+  if (normalized.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(normalized)) {
+    const parsed = new Date(normalized);
+
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  /*
+   * Twelve Data returns US equity timestamps
+   * in New York local time when timezone is
+   * America/New_York.
+   *
+   * August is daylight saving time, so ET is -04:00.
+   */
+  const parsed = new Date(`${normalized}-04:00`);
+
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getLatestCandleInfo(candles: Candle[]): {
+  latestCandleTime: string | null;
+  latestCandleAgeMinutes: number | null;
+} {
+  if (candles.length === 0) {
+    return {
+      latestCandleTime: null,
+      latestCandleAgeMinutes: null,
+    };
+  }
+
+  const latest = candles[candles.length - 1];
+
+  const parsed = new Date(latest.time);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return {
+      latestCandleTime: latest.time || null,
+      latestCandleAgeMinutes: null,
+    };
+  }
+
+  const ageMilliseconds = Date.now() - parsed.getTime();
+
+  const ageMinutes = Math.max(0, Math.floor(ageMilliseconds / 60_000));
+
+  return {
+    latestCandleTime: latest.time,
+    latestCandleAgeMinutes: ageMinutes,
+  };
+}
+
+function getStaleThresholdMinutes(interval: string): number {
+  switch (interval) {
+    case "1min":
+      return 3;
+
+    case "5min":
+      return 10;
+
+    case "15min":
+      return 25;
+
+    case "30min":
+      return 45;
+
+    case "45min":
+      return 65;
+
+    case "1h":
+      return 90;
+
+    case "2h":
+      return 180;
+
+    case "4h":
+      return 360;
+
+    case "1day":
+      return 2880;
+
+    default:
+      return 10;
+  }
+}
+
+function isRegularMarketHoursNow(): boolean {
+  const now = new Date();
+
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    weekday: "short",
+  }).format(now);
+
+  if (weekday === "Sat" || weekday === "Sun") {
+    return false;
+  }
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
+
+  const minute = Number(
+    parts.find((part) => part.type === "minute")?.value ?? 0,
   );
 
-  url.searchParams.set("adjusted", "true");
-  url.searchParams.set("sort", "asc");
-  url.searchParams.set("limit", "50000");
-  url.searchParams.set("apiKey", apiKey);
+  const totalMinutes = hour * 60 + minute;
 
-  return url;
+  /*
+   * Regular US market:
+   * 9:30 AM - 4:00 PM ET
+   */
+  return totalMinutes >= 570 && totalMinutes < 960;
 }
 
 export async function GET(request: Request) {
@@ -205,7 +256,9 @@ export async function GET(request: Request) {
   const interval = normalizeInterval(searchParams.get("interval"));
 
   const cacheKey = buildCacheKey(symbol, interval);
+
   const cached = candleCache.get(cacheKey);
+
   const now = Date.now();
 
   if (cached && now - cached.timestamp < CACHE_TIME_MS) {
@@ -215,42 +268,44 @@ export async function GET(request: Request) {
     });
   }
 
-  const apiKey = process.env.MASSIVE_API_KEY;
+  const apiKey = process.env.TWELVE_DATA_API_KEY;
 
   if (!apiKey) {
     if (cached) {
       return NextResponse.json({
         ...cached.data,
         cached: true,
-        warning: "MASSIVE_API_KEY is missing. Using cached candles.",
+        warning: "Twelve Data API key is unavailable. Using cached candles.",
       });
     }
 
     return NextResponse.json(
       {
-        error: "MASSIVE_API_KEY is missing from .env.local.",
+        error: "TWELVE_DATA_API_KEY is missing from the server environment.",
         symbol,
         interval,
       },
-      { status: 500 },
+      {
+        status: 500,
+      },
     );
   }
 
-  const config = getIntervalConfig(interval);
+  const outputsize = getOutputSize(interval);
 
-  const toDate = new Date();
-  const fromDate = new Date();
+  const url = new URL("https://api.twelvedata.com/time_series");
 
-  fromDate.setDate(toDate.getDate() - config.lookbackDays);
+  url.searchParams.set("symbol", symbol);
 
-  const url = createMassiveUrl({
-    symbol,
-    multiplier: config.multiplier,
-    timespan: config.timespan,
-    from: formatDate(fromDate),
-    to: formatDate(toDate),
-    apiKey,
-  });
+  url.searchParams.set("interval", interval);
+
+  url.searchParams.set("outputsize", String(outputsize));
+
+  url.searchParams.set("order", "ASC");
+
+  url.searchParams.set("timezone", "America/New_York");
+
+  url.searchParams.set("apikey", apiKey);
 
   const controller = new AbortController();
 
@@ -264,26 +319,24 @@ export async function GET(request: Request) {
 
     const text = await response.text();
 
-    let data: MassiveResponse;
+    let data: TwelveDataResponse;
 
     try {
-      data = JSON.parse(text) as MassiveResponse;
+      data = JSON.parse(text) as TwelveDataResponse;
     } catch {
       data = {
-        error: text || "Massive returned an invalid response.",
+        status: "error",
+        message: text || "Twelve Data returned an invalid response.",
       };
     }
 
     if (
       !response.ok ||
-      data.status === "ERROR" ||
-      data.error ||
-      !Array.isArray(data.results)
+      data.status === "error" ||
+      !Array.isArray(data.values)
     ) {
       const message =
-        data.error ||
-        data.message ||
-        `Massive candle request returned HTTP ${response.status}.`;
+        data.message || `Twelve Data returned HTTP ${response.status}.`;
 
       if (cached) {
         return NextResponse.json({
@@ -298,34 +351,49 @@ export async function GET(request: Request) {
           error: message,
           symbol,
           interval,
-          source: "massive",
+          source: "twelve-data",
         },
-        { status: 502 },
+        {
+          status: 502,
+        },
       );
     }
 
-    const candles: Candle[] = data.results
-      .map((bar): Candle => {
-        const timestamp = Number(bar.t ?? 0);
+    const candles: Candle[] = data.values
+      .map((value): Candle | null => {
+        if (!value.datetime) {
+          return null;
+        }
 
-        return {
-          time: timestamp > 0 ? new Date(timestamp).toISOString() : "",
-          open: Number(bar.o ?? 0),
-          high: Number(bar.h ?? 0),
-          low: Number(bar.l ?? 0),
-          close: Number(bar.c ?? 0),
-          volume: Number(bar.v ?? 0),
+        const parsedTime = parseTwelveDataTime(value.datetime);
+
+        const candle: Candle = {
+          time: parsedTime?.toISOString() ?? value.datetime,
+
+          open: Number(value.open ?? 0),
+
+          high: Number(value.high ?? 0),
+
+          low: Number(value.low ?? 0),
+
+          close: Number(value.close ?? 0),
+
+          volume: Number(value.volume ?? 0),
         };
-      })
-      .filter(isValidCandle)
-      .slice(-250);
 
-    if (candles.length < config.minimumCandles) {
+        return isValidCandle(candle) ? candle : null;
+      })
+      .filter((candle): candle is Candle => candle !== null)
+      .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+      .slice(-outputsize);
+
+    if (candles.length < 20) {
       if (cached) {
         return NextResponse.json({
           ...cached.data,
           cached: true,
-          warning: "Massive returned too few candles. Using cached data.",
+          warning:
+            "Twelve Data returned too few candles. Using cached candles.",
         });
       }
 
@@ -335,18 +403,32 @@ export async function GET(request: Request) {
           symbol,
           interval,
           count: candles.length,
-          source: "massive",
+          source: "twelve-data",
         },
-        { status: 502 },
+        {
+          status: 502,
+        },
       );
     }
+
+    const { latestCandleTime, latestCandleAgeMinutes } =
+      getLatestCandleInfo(candles);
+
+    const stale =
+      interval !== "1day" &&
+      isRegularMarketHoursNow() &&
+      latestCandleAgeMinutes !== null &&
+      latestCandleAgeMinutes > getStaleThresholdMinutes(interval);
 
     const result: CandleResult = {
       symbol,
       interval,
       candles,
       cached: false,
-      source: "massive",
+      source: "twelve-data",
+      latestCandleTime,
+      latestCandleAgeMinutes,
+      stale,
     };
 
     candleCache.set(cacheKey, {
@@ -358,12 +440,10 @@ export async function GET(request: Request) {
   } catch (error) {
     const message =
       error instanceof Error && error.name === "AbortError"
-        ? "Massive candle request timed out."
+        ? "Twelve Data request timed out."
         : error instanceof Error
           ? error.message
-          : "Unable to load Massive candle data.";
-
-    console.error("Massive candle request failed:", error);
+          : "Twelve Data request failed.";
 
     if (cached) {
       return NextResponse.json({
@@ -378,9 +458,11 @@ export async function GET(request: Request) {
         error: message,
         symbol,
         interval,
-        source: "massive",
+        source: "twelve-data",
       },
-      { status: 502 },
+      {
+        status: 502,
+      },
     );
   } finally {
     clearTimeout(timeout);
