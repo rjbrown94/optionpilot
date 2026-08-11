@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -41,11 +35,28 @@ type CandleResponse = {
   error?: string;
 };
 
-type ScannerDecision =
-  | "TRADE READY"
-  | "WATCH"
-  | "CONFLICT"
-  | "WAIT";
+type NewsCatalyst = {
+  headline: string;
+  summary: string;
+  source: string;
+  url: string;
+  datetime: number | null;
+  catalystType: string;
+  bias: "Bullish" | "Bearish" | "Neutral";
+  catalystScore: number;
+};
+
+type NewsResponse = {
+  symbol?: string;
+  catalyst?: string;
+  topCatalyst?: NewsCatalyst | null;
+  news?: NewsCatalyst[];
+  filtered?: boolean;
+  error?: string;
+  message?: string;
+};
+
+type ScannerDecision = "TRADE READY" | "WATCH" | "CONFLICT" | "WAIT";
 
 function getMarketStatus(): string {
   const now = new Date();
@@ -66,9 +77,7 @@ function getMarketStatus(): string {
     hour12: false,
   }).formatToParts(now);
 
-  const hour = Number(
-    parts.find((part) => part.type === "hour")?.value ?? 0,
-  );
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
 
   const minute = Number(
     parts.find((part) => part.type === "minute")?.value ?? 0,
@@ -83,15 +92,8 @@ function getMarketStatus(): string {
   return "MARKET CLOSED";
 }
 
-function formatNumber(
-  value: number | null | undefined,
-  decimals = 2,
-): string {
-  if (
-    value === null ||
-    value === undefined ||
-    !Number.isFinite(value)
-  ) {
+function formatNumber(value: number | null | undefined, decimals = 2): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
     return "--";
   }
 
@@ -140,9 +142,7 @@ function getDecision(
   return "WATCH";
 }
 
-function getDecisionClasses(
-  decision: ScannerDecision,
-): string {
+function getDecisionClasses(decision: ScannerDecision): string {
   if (decision === "TRADE READY") {
     return "border-emerald-700 bg-emerald-950/40 text-emerald-300";
   }
@@ -174,6 +174,50 @@ function getDirectionLabel(
   return "WAIT";
 }
 
+function getNewsBiasClasses(bias: NewsCatalyst["bias"]): string {
+  if (bias === "Bullish") {
+    return "border-emerald-800 bg-emerald-950/30 text-emerald-300";
+  }
+
+  if (bias === "Bearish") {
+    return "border-red-800 bg-red-950/30 text-red-300";
+  }
+
+  return "border-zinc-700 bg-zinc-900 text-zinc-300";
+}
+
+function getNewsAlignment(
+  news: NewsCatalyst | null,
+  direction: "CALL" | "PUT" | "WAIT",
+): "ALIGNED" | "CONFLICT" | "NEUTRAL" {
+  if (!news || news.bias === "Neutral" || direction === "WAIT") {
+    return "NEUTRAL";
+  }
+
+  if (
+    (direction === "CALL" && news.bias === "Bullish") ||
+    (direction === "PUT" && news.bias === "Bearish")
+  ) {
+    return "ALIGNED";
+  }
+
+  return "CONFLICT";
+}
+
+function formatNewsTime(timestamp: number | null): string {
+  if (!timestamp) {
+    return "";
+  }
+
+  return new Date(timestamp * 1000).toLocaleString("en-US", {
+    timeZone: "America/Chicago",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 export default function ScannerClient() {
   const searchParams = useSearchParams();
 
@@ -187,31 +231,102 @@ export default function ScannerClient() {
   } = useTradeContext();
 
   const querySymbol =
-    searchParams.get("symbol")?.trim().toUpperCase() ||
-    contextSymbol ||
-    "AAPL";
+    searchParams.get("symbol")?.trim().toUpperCase() || contextSymbol || "AAPL";
 
   const [ticker, setTicker] = useState(querySymbol);
 
   const [candles, setCandles] = useState<Candle[]>([]);
 
+  const [news, setNews] = useState<NewsCatalyst[]>([]);
+
+  const [topCatalyst, setTopCatalyst] = useState<NewsCatalyst | null>(null);
+
   const [loading, setLoading] = useState(true);
+
+  const [newsLoading, setNewsLoading] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
 
+  const [newsError, setNewsError] = useState<string | null>(null);
+
   const [warning, setWarning] = useState<string | null>(null);
 
-  const [updatedAt, setUpdatedAt] = useState<string | null>(
-    null,
-  );
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
 
   const mountedRef = useRef(false);
 
+  const loadNews = useCallback(async (requestedSymbol: string) => {
+    const cleanSymbol = requestedSymbol.trim().toUpperCase();
+
+    if (!cleanSymbol) {
+      return;
+    }
+
+    if (mountedRef.current) {
+      setNewsLoading(true);
+      setNewsError(null);
+    }
+
+    try {
+      const response = await fetch(
+        `/api/news?symbol=${encodeURIComponent(cleanSymbol)}`,
+        {
+          cache: "no-store",
+        },
+      );
+
+      const text = await response.text();
+
+      if (!text.trim()) {
+        throw new Error("News returned an empty response.");
+      }
+
+      let payload: NewsResponse;
+
+      try {
+        payload = JSON.parse(text) as NewsResponse;
+      } catch {
+        throw new Error("News returned invalid JSON.");
+      }
+
+      if (!response.ok || payload.error) {
+        throw new Error(
+          payload.error ||
+            payload.message ||
+            "News is temporarily unavailable.",
+        );
+      }
+
+      if (!mountedRef.current) {
+        return;
+      }
+
+      setNews(Array.isArray(payload.news) ? payload.news : []);
+
+      setTopCatalyst(payload.topCatalyst ?? null);
+    } catch (caught) {
+      if (!mountedRef.current) {
+        return;
+      }
+
+      setNews([]);
+      setTopCatalyst(null);
+
+      setNewsError(
+        caught instanceof Error
+          ? caught.message
+          : "News is temporarily unavailable.",
+      );
+    } finally {
+      if (mountedRef.current) {
+        setNewsLoading(false);
+      }
+    }
+  }, []);
+
   const loadConfirmation = useCallback(
     async (requestedSymbol: string) => {
-      const cleanSymbol = requestedSymbol
-        .trim()
-        .toUpperCase();
+      const cleanSymbol = requestedSymbol.trim().toUpperCase();
 
       if (!cleanSymbol) {
         return;
@@ -226,19 +341,13 @@ export default function ScannerClient() {
         setWarning(null);
       }
 
+      /*
+       * News is context for the same symbol.
+       * It does not control the technical calculation.
+       */
+      void loadNews(cleanSymbol);
+
       try {
-        /*
-         * IMPORTANT:
-         *
-         * The Scanner no longer calls /api/scanner.
-         *
-         * It only requests the 5-minute candle feed that
-         * OptionPilot already uses for technical analysis.
-         *
-         * Smart Money finds the opportunity.
-         * This page confirms the chart.
-         * Contract Selector chooses the option.
-         */
         const response = await fetch(
           `/api/candles?symbol=${encodeURIComponent(
             cleanSymbol,
@@ -251,9 +360,7 @@ export default function ScannerClient() {
         const text = await response.text();
 
         if (!text.trim()) {
-          throw new Error(
-            "No candle data was returned.",
-          );
+          throw new Error("No candle data was returned.");
         }
 
         let payload: CandleResponse;
@@ -261,18 +368,12 @@ export default function ScannerClient() {
         try {
           payload = JSON.parse(text) as CandleResponse;
         } catch {
-          throw new Error(
-            "Technical data returned invalid JSON.",
-          );
+          throw new Error("Technical data returned invalid JSON.");
         }
 
-        if (
-          !response.ok ||
-          payload.error
-        ) {
+        if (!response.ok || payload.error) {
           throw new Error(
-            payload.error ||
-              "Technical data is temporarily unavailable.",
+            payload.error || "Technical data is temporarily unavailable.",
           );
         }
 
@@ -288,9 +389,7 @@ export default function ScannerClient() {
           : [];
 
         if (validCandles.length === 0) {
-          throw new Error(
-            "No valid 5-minute candles are available yet.",
-          );
+          throw new Error("No valid 5-minute candles are available yet.");
         }
 
         if (mountedRef.current) {
@@ -310,18 +409,10 @@ export default function ScannerClient() {
             ? caught.message
             : "Technical confirmation is temporarily unavailable.";
 
-        /*
-         * Never display provider pricing / upgrade messages
-         * inside OptionPilot.
-         */
         const rateLimited =
-          message.toLowerCase().includes(
-            "maximum requests",
-          ) ||
+          message.toLowerCase().includes("maximum requests") ||
           message.toLowerCase().includes("rate limit") ||
-          message.toLowerCase().includes(
-            "upgrade your subscription",
-          );
+          message.toLowerCase().includes("upgrade your subscription");
 
         setError(
           rateLimited
@@ -334,7 +425,7 @@ export default function ScannerClient() {
         }
       }
     },
-    [setSymbol],
+    [loadNews, setSymbol],
   );
 
   useEffect(() => {
@@ -349,7 +440,7 @@ export default function ScannerClient() {
 
   /*
    * Refresh technical confirmation once per minute.
-   * We do NOT continuously hammer the provider.
+   * News is refreshed with the same scan request.
    */
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -366,29 +457,27 @@ export default function ScannerClient() {
       return null;
     }
 
-    const confirmationCandles: ConfirmationCandle[] =
-      candles.map((candle) => ({
-        datetime:
-          candle.datetime ||
-          candle.time ||
-          new Date().toISOString(),
+    const confirmationCandles: ConfirmationCandle[] = candles.map((candle) => ({
+      datetime: candle.datetime || candle.time || new Date().toISOString(),
 
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-        volume: candle.volume,
-      }));
+      open: candle.open,
+      high: candle.high,
+      low: candle.low,
+      close: candle.close,
+      volume: candle.volume,
+    }));
 
-    return calculateTradeConfirmation(
-      ticker,
-      confirmationCandles,
-    );
+    return calculateTradeConfirmation(ticker, confirmationCandles);
   }, [candles, ticker]);
 
   const decision = useMemo(
     () => getDecision(confirmation, direction),
     [confirmation, direction],
+  );
+
+  const newsAlignment = useMemo(
+    () => getNewsAlignment(topCatalyst, direction),
+    [topCatalyst, direction],
   );
 
   const combinedScore = useMemo(() => {
@@ -398,9 +487,7 @@ export default function ScannerClient() {
       return technicalScore;
     }
 
-    return Math.round(
-      technicalScore * 0.7 + confidence * 0.3,
-    );
+    return Math.round(technicalScore * 0.7 + confidence * 0.3);
   }, [confirmation, confidence]);
 
   useEffect(() => {
@@ -408,17 +495,11 @@ export default function ScannerClient() {
       status: decision,
       score: combinedScore,
     });
-  }, [
-    decision,
-    combinedScore,
-    setScannerResult,
-  ]);
+  }, [decision, combinedScore, setScannerResult]);
 
-  const latestCandle =
-    candles[candles.length - 1] ?? null;
+  const latestCandle = candles[candles.length - 1] ?? null;
 
-  const sessionOpen =
-    candles[0]?.open ?? null;
+  const sessionOpen = candles[0]?.open ?? null;
 
   const sessionHigh =
     candles.length > 0
@@ -430,13 +511,17 @@ export default function ScannerClient() {
       ? Math.min(...candles.map((candle) => candle.low))
       : null;
 
-  const contractType =
-    direction === "PUT" ? "put" : "call";
-
-  const contractSelectorUrl =
-    `/cheap-options?symbols=${encodeURIComponent(
-      ticker,
-    )}&type=${contractType}&strategy=${strategy}`;
+  /*
+   * Cheap Options already reads:
+   * symbol
+   * direction
+   * strategy
+   */
+  const contractSelectorUrl = `/cheap-options?symbol=${encodeURIComponent(
+    ticker,
+  )}&direction=${encodeURIComponent(
+    direction,
+  )}&strategy=${encodeURIComponent(strategy)}`;
 
   return (
     <main className="min-h-screen bg-black p-5 text-white md:p-8">
@@ -445,9 +530,7 @@ export default function ScannerClient() {
           ticker={ticker}
           loading={loading}
           onTickerChange={setTicker}
-          onScan={() =>
-            void loadConfirmation(ticker)
-          }
+          onScan={() => void loadConfirmation(ticker)}
         />
 
         <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
@@ -457,28 +540,21 @@ export default function ScannerClient() {
 
           <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm">
             <p>
-              Symbol:{" "}
-              <strong>{ticker}</strong>
+              Symbol: <strong>{ticker}</strong>
             </p>
 
             <p>
-              Direction:{" "}
-              <strong>{direction}</strong>
+              Direction: <strong>{direction}</strong>
             </p>
 
             <p>
-              Strategy:{" "}
-              <strong className="capitalize">
-                {strategy}
-              </strong>
+              Strategy: <strong className="capitalize">{strategy}</strong>
             </p>
 
             <p>
               Flow Confidence:{" "}
               <strong>
-                {confidence !== null
-                  ? `${confidence}/100`
-                  : "--"}
+                {confidence !== null ? `${confidence}/100` : "--"}
               </strong>
             </p>
           </div>
@@ -486,13 +562,9 @@ export default function ScannerClient() {
 
         {warning && (
           <section className="mb-6 rounded-2xl border border-yellow-800 bg-yellow-950/30 p-5">
-            <p className="font-bold text-yellow-300">
-              Data notice
-            </p>
+            <p className="font-bold text-yellow-300">Data notice</p>
 
-            <p className="mt-1 text-sm text-yellow-100">
-              {warning}
-            </p>
+            <p className="mt-1 text-sm text-yellow-100">{warning}</p>
           </section>
         )}
 
@@ -502,15 +574,11 @@ export default function ScannerClient() {
               Technical confirmation temporarily unavailable
             </p>
 
-            <p className="mt-2 text-sm text-yellow-100">
-              {error}
-            </p>
+            <p className="mt-2 text-sm text-yellow-100">{error}</p>
 
             <button
               type="button"
-              onClick={() =>
-                void loadConfirmation(ticker)
-              }
+              onClick={() => void loadConfirmation(ticker)}
               className="mt-4 rounded-xl bg-white px-4 py-2 text-sm font-bold text-black"
             >
               Try Again
@@ -520,9 +588,7 @@ export default function ScannerClient() {
 
         {loading && candles.length === 0 && (
           <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-8">
-            <p className="text-xl font-bold">
-              Checking {ticker} technicals...
-            </p>
+            <p className="text-xl font-bold">Checking {ticker} technicals...</p>
 
             <p className="mt-2 text-zinc-400">
               Loading completed 5-minute candles.
@@ -543,29 +609,20 @@ export default function ScannerClient() {
 
               <div className="mt-3 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                 <div>
-                  <h2 className="text-4xl font-bold">
-                    {decision}
-                  </h2>
+                  <h2 className="text-4xl font-bold">{decision}</h2>
 
                   <p className="mt-2">
                     Scanner Signal:{" "}
-                    <strong>
-                      {getDirectionLabel(
-                        confirmation,
-                      )}
-                    </strong>
+                    <strong>{getDirectionLabel(confirmation)}</strong>
                   </p>
 
                   <p className="mt-1 text-sm opacity-80">
                     {getMarketStatus()}
                     {updatedAt
-                      ? ` · Updated ${new Date(
-                          updatedAt,
-                        ).toLocaleTimeString(
+                      ? ` · Updated ${new Date(updatedAt).toLocaleTimeString(
                           "en-US",
                           {
-                            timeZone:
-                              "America/Chicago",
+                            timeZone: "America/Chicago",
                           },
                         )} CT`
                       : ""}
@@ -573,30 +630,166 @@ export default function ScannerClient() {
                 </div>
 
                 <div className="text-left md:text-right">
-                  <p className="text-4xl font-bold">
-                    {combinedScore}/100
-                  </p>
+                  <p className="text-4xl font-bold">{combinedScore}/100</p>
 
-                  <p className="text-xs opacity-80">
-                    Flow + technical score
-                  </p>
+                  <p className="text-xs opacity-80">Flow + technical score</p>
                 </div>
               </div>
             </section>
 
             <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-              <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div>
-                  <p className="text-sm text-zinc-500">
-                    {ticker}
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-400">
+                    News Catalyst
                   </p>
 
+                  <h2 className="mt-2 text-2xl font-bold">
+                    {ticker} Market News
+                  </h2>
+                </div>
+
+                {topCatalyst && (
+                  <div
+                    className={`rounded-full border px-4 py-2 text-sm font-bold ${getNewsBiasClasses(
+                      topCatalyst.bias,
+                    )}`}
+                  >
+                    {topCatalyst.bias} · {topCatalyst.catalystScore}/100
+                  </div>
+                )}
+              </div>
+
+              {newsLoading && news.length === 0 && (
+                <p className="mt-5 text-sm text-zinc-500">
+                  Checking recent {ticker} news...
+                </p>
+              )}
+
+              {newsError && (
+                <div className="mt-5 rounded-xl border border-zinc-800 bg-black p-4">
+                  <p className="text-sm text-zinc-400">
+                    News is temporarily unavailable. Technical analysis is still
+                    active.
+                  </p>
+                </div>
+              )}
+
+              {!newsLoading && !newsError && !topCatalyst && (
+                <div className="mt-5 rounded-xl border border-zinc-800 bg-black p-4">
+                  <p className="text-sm text-zinc-400">
+                    No major recent catalyst was found for {ticker}.
+                  </p>
+                </div>
+              )}
+
+              {topCatalyst && (
+                <>
+                  <div className="mt-5 rounded-2xl border border-zinc-800 bg-black p-5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-zinc-800 px-3 py-1 text-xs font-bold text-zinc-300">
+                        {topCatalyst.catalystType}
+                      </span>
+
+                      <span className="text-xs text-zinc-500">
+                        {topCatalyst.source}
+                      </span>
+
+                      {topCatalyst.datetime && (
+                        <span className="text-xs text-zinc-600">
+                          {formatNewsTime(topCatalyst.datetime)} CT
+                        </span>
+                      )}
+                    </div>
+
+                    <h3 className="mt-4 text-xl font-bold">
+                      {topCatalyst.headline}
+                    </h3>
+
+                    {topCatalyst.summary && (
+                      <p className="mt-3 text-sm leading-6 text-zinc-400">
+                        {topCatalyst.summary}
+                      </p>
+                    )}
+
+                    {topCatalyst.url && (
+                      <a
+                        href={topCatalyst.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-4 inline-block text-sm font-bold text-blue-400 hover:text-blue-300"
+                      >
+                        Read Source →
+                      </a>
+                    )}
+                  </div>
+
+                  <div className="mt-4 rounded-xl border border-zinc-800 bg-black p-4">
+                    <p className="text-xs font-bold uppercase tracking-wide text-zinc-500">
+                      News vs Trade Direction
+                    </p>
+
+                    {newsAlignment === "ALIGNED" && (
+                      <p className="mt-2 font-bold text-emerald-400">
+                        ✓ News catalyst supports the current {direction} thesis.
+                      </p>
+                    )}
+
+                    {newsAlignment === "CONFLICT" && (
+                      <p className="mt-2 font-bold text-red-400">
+                        ⚠ News catalyst conflicts with the current {direction}{" "}
+                        thesis.
+                      </p>
+                    )}
+
+                    {newsAlignment === "NEUTRAL" && (
+                      <p className="mt-2 text-zinc-400">
+                        News is neutral or does not provide directional
+                        confirmation.
+                      </p>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {news.length > 1 && (
+                <div className="mt-5 space-y-3">
+                  <p className="font-bold text-zinc-300">More Recent News</p>
+
+                  {news.slice(1, 4).map((item, index) => (
+                    <div
+                      key={`${item.headline}-${index}`}
+                      className="rounded-xl border border-zinc-800 bg-black p-4"
+                    >
+                      <div className="flex flex-wrap gap-2 text-xs">
+                        <span className="font-bold text-zinc-400">
+                          {item.catalystType}
+                        </span>
+
+                        <span className="text-zinc-600">{item.source}</span>
+                      </div>
+
+                      <p className="mt-2 font-semibold text-zinc-200">
+                        {item.headline}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <p className="mt-5 text-xs leading-5 text-zinc-500">
+                News is used as catalyst context and confirmation only. A
+                headline by itself does not make a trade ready.
+              </p>
+            </section>
+
+            <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+              <div className="flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <p className="text-sm text-zinc-500">{ticker}</p>
+
                   <p className="mt-1 text-4xl font-bold">
-                    {latestCandle
-                      ? `$${latestCandle.close.toFixed(
-                          2,
-                        )}`
-                      : "--"}
+                    {latestCandle ? `$${latestCandle.close.toFixed(2)}` : "--"}
                   </p>
 
                   <p className="mt-2 text-xs text-zinc-500">
@@ -607,38 +800,26 @@ export default function ScannerClient() {
 
               <div className="mt-5 grid gap-3 sm:grid-cols-3">
                 <div className="rounded-xl bg-black p-4">
-                  <p className="text-xs text-zinc-500">
-                    Session Open
-                  </p>
+                  <p className="text-xs text-zinc-500">Session Open</p>
 
                   <p className="mt-1 text-xl font-bold">
-                    {sessionOpen !== null
-                      ? `$${sessionOpen.toFixed(2)}`
-                      : "--"}
+                    {sessionOpen !== null ? `$${sessionOpen.toFixed(2)}` : "--"}
                   </p>
                 </div>
 
                 <div className="rounded-xl bg-black p-4">
-                  <p className="text-xs text-zinc-500">
-                    Session High
-                  </p>
+                  <p className="text-xs text-zinc-500">Session High</p>
 
                   <p className="mt-1 text-xl font-bold">
-                    {sessionHigh !== null
-                      ? `$${sessionHigh.toFixed(2)}`
-                      : "--"}
+                    {sessionHigh !== null ? `$${sessionHigh.toFixed(2)}` : "--"}
                   </p>
                 </div>
 
                 <div className="rounded-xl bg-black p-4">
-                  <p className="text-xs text-zinc-500">
-                    Session Low
-                  </p>
+                  <p className="text-xs text-zinc-500">Session Low</p>
 
                   <p className="mt-1 text-xl font-bold">
-                    {sessionLow !== null
-                      ? `$${sessionLow.toFixed(2)}`
-                      : "--"}
+                    {sessionLow !== null ? `$${sessionLow.toFixed(2)}` : "--"}
                   </p>
                 </div>
               </div>
@@ -649,57 +830,39 @@ export default function ScannerClient() {
             </section>
 
             <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-              <h2 className="text-2xl font-bold">
-                5-Minute Technical Check
-              </h2>
+              <h2 className="text-2xl font-bold">5-Minute Technical Check</h2>
 
               <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="rounded-xl bg-black p-4">
-                  <p className="text-xs text-zinc-500">
-                    VWAP
-                  </p>
+                  <p className="text-xs text-zinc-500">VWAP</p>
 
                   <p className="mt-1 text-xl font-bold">
-                    {formatNumber(
-                      confirmation?.vwap,
-                    )}
+                    {formatNumber(confirmation?.vwap)}
                   </p>
                 </div>
 
                 <div className="rounded-xl bg-black p-4">
-                  <p className="text-xs text-zinc-500">
-                    9 EMA
-                  </p>
+                  <p className="text-xs text-zinc-500">9 EMA</p>
 
                   <p className="mt-1 text-xl font-bold">
-                    {formatNumber(
-                      confirmation?.ema9,
-                    )}
+                    {formatNumber(confirmation?.ema9)}
                   </p>
                 </div>
 
                 <div className="rounded-xl bg-black p-4">
-                  <p className="text-xs text-zinc-500">
-                    20 EMA
-                  </p>
+                  <p className="text-xs text-zinc-500">20 EMA</p>
 
                   <p className="mt-1 text-xl font-bold">
-                    {formatNumber(
-                      confirmation?.ema20,
-                    )}
+                    {formatNumber(confirmation?.ema20)}
                   </p>
                 </div>
 
                 <div className="rounded-xl bg-black p-4">
-                  <p className="text-xs text-zinc-500">
-                    Relative Volume
-                  </p>
+                  <p className="text-xs text-zinc-500">Relative Volume</p>
 
                   <p className="mt-1 text-xl font-bold">
                     {confirmation
-                      ? `${confirmation.relativeVolume.toFixed(
-                          2,
-                        )}x`
+                      ? `${confirmation.relativeVolume.toFixed(2)}x`
                       : "--"}
                   </p>
                 </div>
@@ -707,42 +870,29 @@ export default function ScannerClient() {
 
               <div className="mt-6 grid gap-5 md:grid-cols-2">
                 <div>
-                  <p className="font-bold text-emerald-400">
-                    Confirmations
-                  </p>
+                  <p className="font-bold text-emerald-400">Confirmations</p>
 
                   <div className="mt-3 space-y-2">
-                    {(confirmation?.confirmations ??
-                      []).map((item) => (
-                      <p
-                        key={item}
-                        className="text-sm text-zinc-300"
-                      >
+                    {(confirmation?.confirmations ?? []).map((item) => (
+                      <p key={item} className="text-sm text-zinc-300">
                         ✓ {item}
                       </p>
                     ))}
 
                     {!confirmation && (
                       <p className="text-sm text-zinc-500">
-                        Waiting for at least 20 valid
-                        5-minute candles.
+                        Waiting for at least 20 valid 5-minute candles.
                       </p>
                     )}
                   </div>
                 </div>
 
                 <div>
-                  <p className="font-bold text-yellow-400">
-                    Warnings
-                  </p>
+                  <p className="font-bold text-yellow-400">Warnings</p>
 
                   <div className="mt-3 space-y-2">
-                    {(confirmation?.warnings ??
-                      []).map((item) => (
-                      <p
-                        key={item}
-                        className="text-sm text-zinc-300"
-                      >
+                    {(confirmation?.warnings ?? []).map((item) => (
+                      <p key={item} className="text-sm text-zinc-300">
                         ⚠ {item}
                       </p>
                     ))}
@@ -752,39 +902,33 @@ export default function ScannerClient() {
             </section>
 
             <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
-              <h2 className="text-2xl font-bold">
-                What OptionPilot Says
-              </h2>
+              <h2 className="text-2xl font-bold">What OptionPilot Says</h2>
 
               {decision === "TRADE READY" && (
                 <p className="mt-3 text-emerald-300">
-                  The 5-minute technical setup agrees
-                  with the current {direction} flow.
-                  Move to Contract Selector and choose
-                  the highest-quality contract.
+                  The 5-minute technical setup agrees with the current{" "}
+                  {direction} flow. Review the news catalyst, then move to
+                  Contract Selector and choose the highest-quality contract.
                 </p>
               )}
 
               {decision === "WATCH" && (
                 <p className="mt-3 text-yellow-300">
-                  The direction is not fully confirmed
-                  yet. Keep watching VWAP, market
-                  structure, EMA alignment, and volume.
+                  The direction is not fully confirmed yet. Keep watching VWAP,
+                  market structure, EMA alignment, volume, and catalyst context.
                 </p>
               )}
 
               {decision === "CONFLICT" && (
                 <p className="mt-3 text-red-300">
-                  Smart Money direction and the
-                  technical chart currently disagree.
-                  Do not enter until they align.
+                  Smart Money direction and the technical chart currently
+                  disagree. Do not enter until they align.
                 </p>
               )}
 
               {decision === "WAIT" && (
                 <p className="mt-3 text-zinc-300">
-                  OptionPilot does not have enough
-                  technical evidence yet.
+                  OptionPilot does not have enough technical evidence yet.
                 </p>
               )}
 
