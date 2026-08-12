@@ -1,4 +1,5 @@
 import { getMassiveCandles } from "./massiveCandles";
+import { getMassiveStockSnapshots } from "./massiveSnapshot";
 import { withMarketCache } from "./dataCache";
 
 export type MarketQuote = {
@@ -14,7 +15,7 @@ export type MarketQuote = {
   averageVolume: number;
   relativeVolume: number;
   updatedAt: string;
-  source: "massive-aggregates";
+  source: "massive-snapshot";
 };
 
 function normalizeSymbol(symbol: string): string {
@@ -45,67 +46,118 @@ export async function getMassiveQuote({
 
   return withMarketCache<MarketQuote>({
     key: `massive:quote:${cleanSymbol}`,
-    ttlMilliseconds: 60_000,
+    ttlMilliseconds: 30_000,
     forceRefresh,
 
     request: async () => {
-      const candles = await getMassiveCandles({
-        symbol: cleanSymbol,
-        interval: "1day",
-        limit: 30,
-        forceRefresh,
-      });
+      /*
+       * Snapshot = current/live market price.
+       * Daily candles = historical volume only.
+       *
+       * Never use a historical candle close as the primary
+       * current stock price.
+       */
+      const [snapshots, dailyCandles] = await Promise.all([
+        getMassiveStockSnapshots({
+          symbols: [cleanSymbol],
+          forceRefresh,
+        }),
 
-      if (candles.length < 2) {
+        getMassiveCandles({
+          symbol: cleanSymbol,
+          interval: "1day",
+          limit: 30,
+          forceRefresh,
+        }),
+      ]);
+
+      const snapshot = snapshots.find(
+        (item) => item.symbol === cleanSymbol,
+      );
+
+      if (!snapshot) {
         throw new Error(
-          `Not enough daily candles were returned for ${cleanSymbol}.`,
+          `Massive returned no stock snapshot for ${cleanSymbol}.`,
         );
       }
 
-      const latest = candles[candles.length - 1];
-      const previous = candles[candles.length - 2];
-
-      const price = latest.close;
-      const previousClose = previous.close;
+      const price = snapshot.price;
+      const previousClose = snapshot.previousClose;
 
       if (
         !Number.isFinite(price) ||
-        !Number.isFinite(previousClose) ||
-        price <= 0 ||
-        previousClose <= 0
+        price <= 0
       ) {
         throw new Error(
-          `Massive returned invalid quote data for ${cleanSymbol}.`,
+          `Massive returned an invalid live price for ${cleanSymbol}.`,
         );
       }
 
-      const change = price - previousClose;
-      const percentChange = (change / previousClose) * 100;
+      /*
+       * Massive snapshot already provides change information.
+       * Recalculate only when needed.
+       */
+      const change =
+        Number.isFinite(snapshot.change)
+          ? snapshot.change
+          : previousClose > 0
+            ? price - previousClose
+            : 0;
 
-      const recentVolumes = candles
+      const percentChange =
+        Number.isFinite(snapshot.percentChange)
+          ? snapshot.percentChange
+          : previousClose > 0
+            ? (change / previousClose) * 100
+            : 0;
+
+      /*
+       * Use completed historical daily candles to calculate
+       * 20-day average volume.
+       */
+      const historicalVolumes = dailyCandles
         .slice(-21, -1)
         .map((candle) => candle.volume)
-        .filter((value) => Number.isFinite(value) && value >= 0);
+        .filter(
+          (value) =>
+            Number.isFinite(value) &&
+            value >= 0,
+        );
 
-      const averageVolume = average(recentVolumes);
+      const averageVolume = average(historicalVolumes);
 
       const relativeVolume =
-        averageVolume > 0 ? latest.volume / averageVolume : 0;
+        averageVolume > 0
+          ? snapshot.volume / averageVolume
+          : snapshot.relativeVolume;
+
+      const updatedAt =
+        snapshot.lastUpdated &&
+        Number.isFinite(snapshot.lastUpdated)
+          ? new Date(snapshot.lastUpdated).toISOString()
+          : new Date().toISOString();
 
       return {
         symbol: cleanSymbol,
+
         price: round(price),
-        open: round(latest.open),
-        high: round(latest.high),
-        low: round(latest.low),
+
+        open: round(snapshot.open),
+        high: round(snapshot.high),
+        low: round(snapshot.low),
+
         previousClose: round(previousClose),
+
         change: round(change),
         percentChange: round(percentChange),
-        volume: Math.round(latest.volume),
+
+        volume: Math.round(snapshot.volume),
         averageVolume: Math.round(averageVolume),
         relativeVolume: round(relativeVolume),
-        updatedAt: new Date().toISOString(),
-        source: "massive-aggregates",
+
+        updatedAt,
+
+        source: "massive-snapshot",
       };
     },
   });

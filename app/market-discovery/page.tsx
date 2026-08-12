@@ -117,12 +117,105 @@ function getTradeFocus(direction: Direction): string {
   return "Wait for confirmation";
 }
 
+type MarketSession = {
+  status: "PREMARKET" | "OPEN" | "CLOSED";
+  label: string;
+  description: string;
+  badgeClasses: string;
+};
+
+function getCentralMarketSession(date: Date): MarketSession {
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+
+  const parts = formatter.formatToParts(date);
+
+  const weekday =
+    parts.find((part) => part.type === "weekday")?.value ?? "";
+
+  const hour = Number(
+    parts.find((part) => part.type === "hour")?.value ?? "0",
+  );
+
+  const minute = Number(
+    parts.find((part) => part.type === "minute")?.value ?? "0",
+  );
+
+  const minutesSinceMidnight = hour * 60 + minute;
+
+  const marketOpen = 8 * 60 + 30;
+  const marketClose = 15 * 60;
+
+  const isWeekday = !["Sat", "Sun"].includes(weekday);
+
+  if (!isWeekday) {
+    return {
+      status: "CLOSED",
+      label: "MARKET CLOSED",
+      description:
+        "The regular U.S. stock market is closed for the weekend.",
+      badgeClasses:
+        "border-zinc-700 bg-zinc-800/70 text-zinc-300",
+    };
+  }
+
+  if (minutesSinceMidnight < marketOpen) {
+    return {
+      status: "PREMARKET",
+      label: "PRE-MARKET",
+      description:
+        "Regular trading begins at 8:30 AM CT. Discovery results may be limited before the opening bell.",
+      badgeClasses:
+        "border-yellow-700 bg-yellow-950/50 text-yellow-300",
+    };
+  }
+
+  if (minutesSinceMidnight >= marketClose) {
+    return {
+      status: "CLOSED",
+      label: "MARKET CLOSED",
+      description:
+        "Regular trading ended at 3:00 PM CT. Momentum and relative-volume results may be limited after hours.",
+      badgeClasses:
+        "border-zinc-700 bg-zinc-800/70 text-zinc-300",
+    };
+  }
+
+  return {
+    status: "OPEN",
+    label: "LIVE SCAN",
+    description:
+      "Regular market session is active. Discovery is scanning live market conditions.",
+    badgeClasses:
+      "border-emerald-700 bg-emerald-950/50 text-emerald-300",
+  };
+}
+
 export default function MarketDiscoveryPage() {
   const [data, setData] = useState<DiscoveryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("opportunities");
+  const [currentTime, setCurrentTime] = useState(() => new Date());
+
+  const marketSession = useMemo(
+    () => getCentralMarketSession(currentTime),
+    [currentTime],
+  );
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setCurrentTime(new Date());
+    }, 30_000);
+
+    return () => window.clearInterval(timer);
+  }, []);
 
   const loadDiscovery = useCallback(async (refresh = false) => {
     if (refresh) {
@@ -321,7 +414,7 @@ export default function MarketDiscoveryPage() {
               </div>
 
               <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
-                <p className="text-sm text-zinc-500">Failed</p>
+                <p className="text-sm text-zinc-500">Not Qualified</p>
                 <p className="mt-2 text-3xl font-bold text-yellow-300">
                   {data.failed}
                 </p>
@@ -339,13 +432,26 @@ export default function MarketDiscoveryPage() {
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="font-bold">Discovery Status</p>
+
                   <p className="mt-1 text-sm text-zinc-500">
-                    Updated {new Date(data.updatedAt).toLocaleTimeString()}
+                    Updated{" "}
+                    {new Date(data.updatedAt).toLocaleTimeString("en-US", {
+                      timeZone: "America/Chicago",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}{" "}
+                    CT
+                  </p>
+
+                  <p className="mt-2 text-sm text-zinc-400">
+                    {marketSession.description}
                   </p>
                 </div>
 
-                <span className="w-fit rounded-full border border-emerald-700 bg-emerald-950/50 px-3 py-1 text-xs font-bold text-emerald-300">
-                  {data.cached ? "CACHED" : "LIVE SCAN"}
+                <span
+                  className={`w-fit rounded-full border px-3 py-1 text-xs font-bold ${marketSession.badgeClasses}`}
+                >
+                  {marketSession.label}
                 </span>
               </div>
             </section>
@@ -484,10 +590,26 @@ export default function MarketDiscoveryPage() {
 
             {visibleCandidates.length === 0 && (
               <section className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-900 p-8 text-center">
-                <p className="text-xl font-bold">No qualifying setups found.</p>
-                <p className="mt-2 text-zinc-400">
-                  Refresh the market or try again during active trading hours.
+                <p className="text-xl font-bold">
+                  {marketSession.status === "OPEN"
+                    ? "No qualifying setups found."
+                    : marketSession.status === "PREMARKET"
+                      ? "Regular market has not opened yet."
+                      : "Market is currently closed."}
                 </p>
+
+                <p className="mt-2 text-zinc-400">
+                  {marketSession.status === "OPEN"
+                    ? "No stocks currently meet the discovery requirements. The scanner is working normally."
+                    : marketSession.description}
+                </p>
+
+                {marketSession.status !== "OPEN" && (
+                  <p className="mt-3 text-sm text-zinc-500">
+                    Market Discovery is optimized for the regular session,
+                    8:30 AM–3:00 PM CT.
+                  </p>
+                )}
               </section>
             )}
           </>
