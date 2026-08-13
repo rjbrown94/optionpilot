@@ -228,7 +228,7 @@ export default function MarketDiscoveryPage() {
 
     try {
       const response = await fetch(
-        `/api/discovery?limit=20${refresh ? "&refresh=1" : ""}`,
+        `/api/discovery?limit=5${refresh ? "&refresh=1" : ""}`,
         { cache: "no-store" },
       );
 

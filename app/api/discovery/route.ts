@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 
 const DEFAULT_LIMIT = 75;
 const MAX_LIMIT = 250;
-const DEFAULT_CONCURRENCY = 4;
+const DEFAULT_CONCURRENCY = 1;
 const MAX_CONCURRENCY = 8;
 const DEFAULT_MINIMUM_SCORE = 45;
 
@@ -110,7 +110,7 @@ async function runDiscoveryScan(input: {
   const pending = scanDiscoveryUniverse({
     category: input.category,
     limit: input.limit,
-
+    concurrency: input.concurrency,
     minimumScore: input.minimumScore,
     forceRefresh: input.forceRefresh,
   })
