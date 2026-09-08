@@ -339,10 +339,7 @@ export default function ScannerClient() {
   }, []);
 
   const loadConfirmation = useCallback(
-    async (
-      requestedSymbol: string,
-      forceRefresh = false,
-    ) => {
+    async (requestedSymbol: string) => {
       const cleanSymbol = requestedSymbol.trim().toUpperCase();
 
       if (!cleanSymbol) {
@@ -364,7 +361,7 @@ export default function ScannerClient() {
         const response = await fetch(
           `/api/candles?symbol=${encodeURIComponent(
             cleanSymbol,
-          )}&interval=5min${forceRefresh ? "&refresh=1" : ""}`,
+          )}&interval=5min`,
           {
             cache: "no-store",
           },
@@ -541,7 +538,7 @@ export default function ScannerClient() {
           ticker={ticker}
           loading={loading}
           onTickerChange={setTicker}
-          onScan={() => void loadConfirmation(ticker, true)}
+          onScan={() => void loadConfirmation(ticker)}
         />
 
         <section className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-900 p-5">
@@ -589,7 +586,7 @@ export default function ScannerClient() {
 
             <button
               type="button"
-              onClick={() => void loadConfirmation(ticker, true)}
+              onClick={() => void loadConfirmation(ticker)}
               className="mt-4 rounded-xl bg-white px-4 py-2 text-sm font-bold text-black"
             >
               Try Again

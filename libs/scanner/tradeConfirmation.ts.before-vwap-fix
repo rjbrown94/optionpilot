@@ -54,99 +54,12 @@ function calculateEMA(values: number[], period: number): number[] {
   return emaValues;
 }
 
-function getNewYorkDateTime(datetime: string): {
-  dateKey: string;
-  minutes: number;
-} | null {
-  const date = new Date(datetime);
-
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
-
-  const getPart = (type: string): string =>
-    parts.find((part) => part.type === type)?.value ?? "";
-
-  const year = getPart("year");
-  const month = getPart("month");
-  const day = getPart("day");
-
-  const hour = Number(getPart("hour"));
-  const minute = Number(getPart("minute"));
-
-  if (
-    !year ||
-    !month ||
-    !day ||
-    !Number.isFinite(hour) ||
-    !Number.isFinite(minute)
-  ) {
-    return null;
-  }
-
-  return {
-    dateKey: `${year}-${month}-${day}`,
-    minutes: hour * 60 + minute,
-  };
-}
-
 function calculateSessionVWAP(candles: ConfirmationCandle[]): number {
-  const REGULAR_SESSION_OPEN = 9 * 60 + 30;
-  const REGULAR_SESSION_CLOSE = 16 * 60;
-
-  const regularSessionCandles = candles
-    .map((candle) => ({
-      candle,
-      session: getNewYorkDateTime(candle.datetime),
-    }))
-    .filter(
-      (
-        item,
-      ): item is {
-        candle: ConfirmationCandle;
-        session: {
-          dateKey: string;
-          minutes: number;
-        };
-      } =>
-        item.session !== null &&
-        item.session.minutes >= REGULAR_SESSION_OPEN &&
-        item.session.minutes < REGULAR_SESSION_CLOSE,
-    );
-
-  if (regularSessionCandles.length === 0) {
-    return candles[candles.length - 1]?.close ?? 0;
-  }
-
-  /*
-   * VWAP resets every regular trading session.
-   * Use only the most recent U.S. market session
-   * represented in the candle data.
-   */
-  const latestSessionDate =
-    regularSessionCandles[regularSessionCandles.length - 1].session.dateKey;
-
-  const latestSessionCandles = regularSessionCandles.filter(
-    (item) => item.session.dateKey === latestSessionDate,
-  );
-
   let cumulativePriceVolume = 0;
   let cumulativeVolume = 0;
 
-  for (const { candle } of latestSessionCandles) {
-    const typicalPrice =
-      (candle.high + candle.low + candle.close) / 3;
-
+  for (const candle of candles) {
+    const typicalPrice = (candle.high + candle.low + candle.close) / 3;
     const volume = Number.isFinite(candle.volume)
       ? Math.max(candle.volume, 0)
       : 0;
@@ -156,9 +69,7 @@ function calculateSessionVWAP(candles: ConfirmationCandle[]): number {
   }
 
   if (cumulativeVolume === 0) {
-    return latestSessionCandles[
-      latestSessionCandles.length - 1
-    ]?.candle.close ?? 0;
+    return candles[candles.length - 1]?.close ?? 0;
   }
 
   return cumulativePriceVolume / cumulativeVolume;

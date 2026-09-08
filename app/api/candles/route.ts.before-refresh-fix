@@ -255,21 +255,13 @@ export async function GET(request: Request) {
 
   const interval = normalizeInterval(searchParams.get("interval"));
 
-  const forceRefresh =
-    searchParams.get("refresh") === "1" ||
-    searchParams.get("refresh") === "true";
-
   const cacheKey = buildCacheKey(symbol, interval);
 
   const cached = candleCache.get(cacheKey);
 
   const now = Date.now();
 
-  if (
-    !forceRefresh &&
-    cached &&
-    now - cached.timestamp < CACHE_TIME_MS
-  ) {
+  if (cached && now - cached.timestamp < CACHE_TIME_MS) {
     return NextResponse.json({
       ...cached.data,
       cached: true,

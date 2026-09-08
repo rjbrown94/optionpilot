@@ -464,17 +464,77 @@ export function getDiscoveryUniverse(limit = 250): string[] {
     "semiconductors",
     "ai-infrastructure",
     "software-cloud",
+    "cybersecurity",
     "financials",
     "energy",
     "industrials",
     "healthcare",
     "consumer",
+    "communications",
+    "materials",
+    "utilities",
+    "real-estate",
     "high-beta",
+    "defensive",
   ];
 
-  const symbols = priorityCategories.flatMap((category) =>
-    getUniverseSymbols(category),
-  );
+  const categorySymbols = priorityCategories.map((category) => ({
+    category,
+    symbols: getUniverseSymbols(category),
+  }));
 
-  return Array.from(new Set(symbols)).slice(0, Math.max(1, limit));
+  const selected: string[] = [];
+  const seen = new Set<string>();
+
+  /*
+   * Round-robin through every category.
+   *
+   * Instead of:
+   * SPY, QQQ, DIA, IWM, VOO...
+   *
+   * Discovery gets a balanced sample from across
+   * the entire market.
+   */
+  let symbolIndex = 0;
+
+  while (selected.length < limit) {
+    let addedThisRound = false;
+
+    for (const group of categorySymbols) {
+      const symbol = group.symbols[symbolIndex];
+
+      if (!symbol) {
+        continue;
+      }
+
+      if (!seen.has(symbol)) {
+        seen.add(symbol);
+        selected.push(symbol);
+        addedThisRound = true;
+
+        if (selected.length >= limit) {
+          break;
+        }
+      }
+    }
+
+    if (!addedThisRound) {
+      /*
+       * Some symbols appear in multiple categories.
+       * If this round added nothing, continue looking
+       * deeper until every category has been exhausted.
+       */
+      const hasMoreSymbols = categorySymbols.some(
+        (group) => symbolIndex + 1 < group.symbols.length,
+      );
+
+      if (!hasMoreSymbols) {
+        break;
+      }
+    }
+
+    symbolIndex += 1;
+  }
+
+  return selected.slice(0, Math.max(1, limit));
 }

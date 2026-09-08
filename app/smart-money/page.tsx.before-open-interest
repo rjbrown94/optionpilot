@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import SmartMoneyCard from "@/components/smart-money/SmartMoneyCard";
 import LoadingSkeleton from "@/components/ui/LoadingSkeleton";
@@ -89,30 +89,9 @@ type AggregatedFlow = {
   labels: string[];
 };
 
-type ContractSnapshot = {
-  volume: number;
-  openInterest: number;
-};
-
-type MassiveSnapshotContract = {
-  ticker: string;
-  volume: number;
-  openInterest: number;
-};
-
-type MassiveSnapshotResponse = {
-  success: boolean;
-  contracts?: MassiveSnapshotContract[];
-  error?: string;
-};
-
 const MAX_TRADES = 500;
 
 const MINIMUM_PREMIUM = 10_000;
-
-function normalizeContractSymbol(value: string): string {
-  return value.trim().toUpperCase().replace(/^O:/, "");
-}
 
 function formatCompactCurrency(value: number): string {
   if (!Number.isFinite(value)) {
@@ -168,12 +147,6 @@ function getStatusLabel(status: ConnectionStatus): string {
 
 export default function SmartMoneyPage() {
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
-
-  const [contractSnapshots, setContractSnapshots] = useState<
-    Record<string, ContractSnapshot>
-  >({});
-
-  const requestedSnapshotsRef = useRef<Set<string>>(new Set());
 
   const [error, setError] = useState<string | null>(null);
 
@@ -510,95 +483,6 @@ export default function SmartMoneyPage() {
       .slice(0, 20);
   }, [trades]);
 
-  const flowContractKey = useMemo(
-    () =>
-      flow
-        .map((item) => item.contractSymbol)
-        .sort()
-        .join("|"),
-    [flow],
-  );
-
-  useEffect(() => {
-    async function loadContractSnapshots(): Promise<void> {
-      for (const item of flow) {
-        const contractSymbol = item.contractSymbol;
-
-        if (
-          !contractSymbol ||
-          requestedSnapshotsRef.current.has(contractSymbol)
-        ) {
-          continue;
-        }
-
-        requestedSnapshotsRef.current.add(contractSymbol);
-
-        try {
-          const params = new URLSearchParams({
-            symbol: item.symbol,
-            type: item.direction === "CALLS" ? "call" : "put",
-            limit: "10",
-          });
-
-          if (item.expiration) {
-            params.set("expiration", item.expiration);
-          }
-
-          if (
-            item.strike !== null &&
-            Number.isFinite(item.strike)
-          ) {
-            params.set("strike", String(item.strike));
-          }
-
-          const response = await fetch(
-            `/api/massive-options?${params.toString()}`,
-            {
-              cache: "no-store",
-            },
-          );
-
-          const payload =
-            (await response.json()) as MassiveSnapshotResponse;
-
-          if (!response.ok || payload.success === false) {
-            continue;
-          }
-
-          const normalizedTarget =
-            normalizeContractSymbol(contractSymbol);
-
-          const exactContract =
-            payload.contracts?.find(
-              (contract) =>
-                normalizeContractSymbol(contract.ticker) ===
-                normalizedTarget,
-            ) ??
-            payload.contracts?.[0] ??
-            null;
-
-          if (!exactContract) {
-            continue;
-          }
-
-          setContractSnapshots((current) => ({
-            ...current,
-
-            [contractSymbol]: {
-              volume: exactContract.volume,
-              openInterest: exactContract.openInterest,
-            },
-          }));
-        } catch {
-          // Keep the live Smart Money stream running even if
-          // the daily snapshot is temporarily unavailable.
-        }
-      }
-    }
-
-    void loadContractSnapshots();
-  }, [flowContractKey]);
-
   const callPremium = useMemo(
     () =>
       trades
@@ -729,12 +613,8 @@ export default function SmartMoneyPage() {
                   expiration={item.expiration}
                   premium={item.premium}
                   tradePrice={item.tradePrice}
-                  volume={
-                    contractSnapshots[item.contractSymbol]?.volume ?? null
-                  }
-                  openInterest={
-                    contractSnapshots[item.contractSymbol]?.openInterest ?? null
-                  }
+                  volume={item.volume}
+                  openInterest={null}
                   bid={item.bidPrice}
                   ask={item.askPrice}
                   side={item.side}
