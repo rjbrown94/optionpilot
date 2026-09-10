@@ -427,67 +427,19 @@ function getLevelScoreAdjustment(
   }
 
   if (levels.setup === "BREAKOUT") {
-    const distance =
-      levels.distanceToResistancePercent ??
-      Number.POSITIVE_INFINITY;
+    points += 24;
 
-    if (distance <= 0.75) {
-      points += 26;
-
-      reasons.push(
-        `Fresh resistance breakout (${distance.toFixed(2)}% from level)`,
-      );
-    } else if (distance <= 1.5) {
-      points += 16;
-
-      reasons.push(
-        `Recent resistance breakout (${distance.toFixed(2)}% from level)`,
-      );
-    } else if (distance <= 3) {
-      points += 4;
-
-      reasons.push(
-        `Breakout already extended ${distance.toFixed(2)}% above resistance`,
-      );
-    } else {
-      points -= 20;
-
-      reasons.push(
-        `Breakout is too extended — ${distance.toFixed(2)}% above resistance`,
-      );
-    }
+    reasons.push(
+      "Price has broken confirmed resistance",
+    );
   }
 
   if (levels.setup === "BREAKDOWN") {
-    const distance =
-      levels.distanceToSupportPercent ??
-      Number.POSITIVE_INFINITY;
+    points += 24;
 
-    if (distance <= 0.75) {
-      points += 26;
-
-      reasons.push(
-        `Fresh support breakdown (${distance.toFixed(2)}% from level)`,
-      );
-    } else if (distance <= 1.5) {
-      points += 16;
-
-      reasons.push(
-        `Recent support breakdown (${distance.toFixed(2)}% from level)`,
-      );
-    } else if (distance <= 3) {
-      points += 4;
-
-      reasons.push(
-        `Breakdown already extended ${distance.toFixed(2)}% below support`,
-      );
-    } else {
-      points -= 20;
-
-      reasons.push(
-        `Breakdown is too extended — ${distance.toFixed(2)}% below support`,
-      );
-    }
+    reasons.push(
+      "Price has broken confirmed support",
+    );
   }
 
   if (levels.setup === "NO_KEY_LEVEL") {
@@ -638,92 +590,37 @@ async function enrichTradingViewLevels(
    * Only run the heavier daily support/resistance
    * calculation on a small shortlist.
    */
-  const LEVEL_ANALYSIS_LIMIT = 4;
+  const LEVEL_ANALYSIS_LIMIT = 6;
 
   /*
    * We prefer stocks that have NOT already made
    * enormous moves because the goal is to catch
    * developing setups before chasing them.
    */
-  function getEarlyWatchScore(
-    candidate: DiscoveryCandidate,
-  ): number {
-    const move =
-      Math.abs(candidate.percentChange);
-
-    let score = 0;
-
-    /*
-     * RELATIVE VOLUME
-     *
-     * We want activity building before
-     * the stock becomes too extended.
-     */
-    if (candidate.relativeVolume >= 3) {
-      score += 35;
-    } else if (candidate.relativeVolume >= 2) {
-      score += 28;
-    } else if (candidate.relativeVolume >= 1.5) {
-      score += 22;
-    } else if (candidate.relativeVolume >= 1.2) {
-      score += 15;
-    }
-
-    /*
-     * PRICE MOVEMENT
-     *
-     * A little movement is useful.
-     * Too much movement means we may
-     * already be late.
-     */
-    if (move >= 1 && move <= 3) {
-      score += 30;
-    } else if (move > 3 && move <= 5) {
-      score += 22;
-    } else if (move > 5 && move <= 6.5) {
-      score += 10;
-    } else if (move > 6.5) {
-      score -= 15;
-    } else {
-      score += 12;
-    }
-
-    /*
-     * LIQUIDITY
-     */
-    if (candidate.averageVolume >= 5_000_000) {
-      score += 20;
-    } else if (candidate.averageVolume >= 1_000_000) {
-      score += 15;
-    } else if (candidate.averageVolume >= 500_000) {
-      score += 10;
-    }
-
-    /*
-     * CURRENT ACTIVITY
-     */
-    if (candidate.volume >= 5_000_000) {
-      score += 15;
-    } else if (candidate.volume >= 1_000_000) {
-      score += 10;
-    }
-
-    return score;
-  }
-
   const shortlist = [...candidates]
-    .map((candidate) => ({
-      candidate,
-      earlyWatchScore:
-        getEarlyWatchScore(candidate),
-    }))
-    .sort(
-      (first, second) =>
-        second.earlyWatchScore -
-        first.earlyWatchScore,
-    )
-    .slice(0, LEVEL_ANALYSIS_LIMIT)
-    .map((item) => item.candidate);
+    .sort((first, second) => {
+      const firstMove =
+        Math.abs(first.percentChange);
+
+      const secondMove =
+        Math.abs(second.percentChange);
+
+      const firstExtended =
+        firstMove >= 10 ? 1 : 0;
+
+      const secondExtended =
+        secondMove >= 10 ? 1 : 0;
+
+      if (firstExtended !== secondExtended) {
+        return firstExtended - secondExtended;
+      }
+
+      return (
+        second.relativeVolume -
+        first.relativeVolume
+      );
+    })
+    .slice(0, LEVEL_ANALYSIS_LIMIT);
 
   const enrichedBySymbol =
     new Map<string, DiscoveryCandidate>();
