@@ -9,8 +9,6 @@ import SectionHeader from "@/components/ui/SectionHeader";
 
 type ConnectionStatus = "connecting" | "connected" | "error" | "closed";
 
-type FlowTimeframe = "DAY_TRADE" | "SWING" | "LEAPS";
-
 type InstitutionalSide = "ASK" | "BID" | "MID" | "UNKNOWN";
 
 type SmartMoneyTrade = {
@@ -140,46 +138,6 @@ function formatCompactCurrency(value: number): string {
   return `${sign}$${absoluteValue.toFixed(0)}`;
 }
 
-function getDaysToExpiration(expiration: string | null): number | null {
-  if (!expiration) {
-    return null;
-  }
-
-  const expirationDate = new Date(`${expiration}T23:59:59`);
-
-  if (Number.isNaN(expirationDate.getTime())) {
-    return null;
-  }
-
-  const now = new Date();
-
-  return Math.ceil(
-    (expirationDate.getTime() - now.getTime()) /
-      (1000 * 60 * 60 * 24),
-  );
-}
-
-function matchesTimeframe(
-  trade: SmartMoneyTrade,
-  timeframe: FlowTimeframe,
-): boolean {
-  const dte = getDaysToExpiration(trade.expiration);
-
-  if (dte === null || dte < 0) {
-    return false;
-  }
-
-  if (timeframe === "DAY_TRADE") {
-    return dte <= 7;
-  }
-
-  if (timeframe === "SWING") {
-    return dte >= 8 && dte <= 60;
-  }
-
-  return dte >= 61;
-}
-
 function getStatusClasses(status: ConnectionStatus): string {
   if (status === "connected") {
     return "border-emerald-700 bg-emerald-950/50 text-emerald-300";
@@ -210,9 +168,6 @@ function getStatusLabel(status: ConnectionStatus): string {
 
 export default function SmartMoneyPage() {
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
-
-  const [timeframe, setTimeframe] =
-    useState<FlowTimeframe>("DAY_TRADE");
 
   const [contractSnapshots, setContractSnapshots] = useState<
     Record<string, ContractSnapshot>
@@ -425,10 +380,6 @@ export default function SmartMoneyPage() {
     >();
 
     for (const trade of trades) {
-      if (!matchesTimeframe(trade, timeframe)) {
-        continue;
-      }
-
       const current = grouped.get(trade.underlying) ?? {
         callsPremium: 0,
 
@@ -557,7 +508,7 @@ export default function SmartMoneyPage() {
         return second.premium - first.premium;
       })
       .slice(0, 20);
-  }, [trades, timeframe]);
+  }, [trades]);
 
   const flowContractKey = useMemo(
     () =>
@@ -701,88 +652,6 @@ export default function SmartMoneyPage() {
           </span>
         </header>
 
-        <section className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-sm font-bold uppercase tracking-[0.18em] text-zinc-500">
-                Smart Money Timeframe
-              </p>
-
-              <h2 className="mt-1 text-xl font-bold">
-                What type of trade are you looking for?
-              </h2>
-
-              <p className="mt-1 text-sm text-zinc-400">
-                Filter the live options stream by days until expiration.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setTimeframe("DAY_TRADE")}
-                className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${
-                  timeframe === "DAY_TRADE"
-                    ? "border-emerald-400 bg-emerald-500 text-black"
-                    : "border-zinc-700 bg-black text-zinc-300 hover:border-zinc-500"
-                }`}
-              >
-                Day Trade · 0–7 DTE
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setTimeframe("SWING")}
-                className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${
-                  timeframe === "SWING"
-                    ? "border-emerald-400 bg-emerald-500 text-black"
-                    : "border-zinc-700 bg-black text-zinc-300 hover:border-zinc-500"
-                }`}
-              >
-                Swing · 8–60 DTE
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setTimeframe("LEAPS")}
-                className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${
-                  timeframe === "LEAPS"
-                    ? "border-emerald-400 bg-emerald-500 text-black"
-                    : "border-zinc-700 bg-black text-zinc-300 hover:border-zinc-500"
-                }`}
-              >
-                LEAPS · 61+ DTE
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-4 rounded-xl bg-black p-4 text-sm text-zinc-300">
-            {timeframe === "DAY_TRADE" && (
-              <span>
-                <strong className="text-white">Day Trade:</strong>{" "}
-                Focus on short-dated contracts for today's and near-term
-                momentum. Confirm the setup on your chart before entering.
-              </span>
-            )}
-
-            {timeframe === "SWING" && (
-              <span>
-                <strong className="text-white">Swing:</strong>{" "}
-                Focus on institutional positioning that has more time for
-                the move to develop.
-              </span>
-            )}
-
-            {timeframe === "LEAPS" && (
-              <span>
-                <strong className="text-white">LEAPS:</strong>{" "}
-                Focus on longer-dated positioning rather than immediate
-                intraday movement.
-              </span>
-            )}
-          </div>
-        </section>
-
         <section className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <MetricCard
             title="Bullish Premium"
@@ -828,13 +697,7 @@ export default function SmartMoneyPage() {
         <section className="mt-10">
           <SectionHeader
             title="Live Options Flow"
-            description={`Showing ${
-              timeframe === "DAY_TRADE"
-                ? "0–7 DTE day-trade"
-                : timeframe === "SWING"
-                  ? "8–60 DTE swing"
-                  : "61+ DTE longer-term"
-            } contracts. Ranked by confidence and directional premium captured since this page was opened.`}
+            description="Ranked by institutional confidence and directional premium captured since this page was opened."
           />
 
           {status === "connecting" && trades.length === 0 && (
