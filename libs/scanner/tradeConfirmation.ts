@@ -24,10 +24,6 @@ export type TradeConfirmationResult = {
   aboveVWAP: boolean;
   belowVWAP: boolean;
 
-  higherHigh: boolean;
-  higherLow: boolean;
-  lowerHigh: boolean;
-  lowerLow: boolean;
 
   bullishEMA: boolean;
   bearishEMA: boolean;

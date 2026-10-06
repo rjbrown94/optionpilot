@@ -302,18 +302,6 @@ export async function GET(request: Request) {
       belowVWAP:
         technical.belowVWAP,
 
-      higherHigh:
-        technical.higherHigh,
-
-      higherLow:
-        technical.higherLow,
-
-      lowerHigh:
-        technical.lowerHigh,
-
-      lowerLow:
-        technical.lowerLow,
-
       bullishEMA:
         technical.bullishEMA,
 

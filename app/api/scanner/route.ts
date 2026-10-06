@@ -209,11 +209,6 @@ type ScannerResult = {
     aboveVWAP: boolean;
     belowVWAP: boolean;
 
-    higherHigh: boolean;
-    higherLow: boolean;
-    lowerHigh: boolean;
-    lowerLow: boolean;
-
     bullishEMA: boolean;
     bearishEMA: boolean;
     strongVolume: boolean;
@@ -428,23 +423,23 @@ function getPattern(confirmation: TradeConfirmationResult | null): string {
     return "Not enough candle data";
   }
 
-  if (confirmation.higherHigh && confirmation.higherLow) {
-    return "Confirmed higher-high and higher-low structure";
+  if (
+    confirmation.aboveVWAP &&
+    confirmation.bullishEMA &&
+    confirmation.strongVolume
+  ) {
+    return "Bullish day-trade confirmation";
   }
 
-  if (confirmation.lowerHigh && confirmation.lowerLow) {
-    return "Confirmed lower-high and lower-low structure";
+  if (
+    confirmation.belowVWAP &&
+    confirmation.bearishEMA &&
+    confirmation.strongVolume
+  ) {
+    return "Bearish day-trade confirmation";
   }
 
-  if (confirmation.higherHigh || confirmation.higherLow) {
-    return "Developing bullish structure";
-  }
-
-  if (confirmation.lowerHigh || confirmation.lowerLow) {
-    return "Developing bearish structure";
-  }
-
-  return "No confirmed structure";
+  return "Waiting for VWAP, EMA, and volume alignment";
 }
 
 function normalizeNews(response: NewsResponse | null): {
@@ -696,17 +691,13 @@ function buildScoreBreakdown(input: {
   return {
     trend: confirmation?.direction === "Mixed" ? 5 : 10,
 
-    vwap: confirmation?.aboveVWAP || confirmation?.belowVWAP ? 10 : 0,
+    vwap: confirmation?.aboveVWAP || confirmation?.belowVWAP ? 15 : 0,
 
-    structure:
-      (confirmation?.higherHigh && confirmation?.higherLow) ||
-      (confirmation?.lowerHigh && confirmation?.lowerLow)
-        ? 15
-        : 5,
+    structure: 0,
 
-    ema: confirmation?.bullishEMA || confirmation?.bearishEMA ? 10 : 0,
+    ema: confirmation?.bullishEMA || confirmation?.bearishEMA ? 15 : 0,
 
-    volume: confirmation?.strongVolume ? 10 : 0,
+    volume: confirmation?.strongVolume ? 15 : 0,
 
     rsi: rsi !== null && rsi >= 45 && rsi <= 70 ? 10 : 5,
 
@@ -1060,14 +1051,6 @@ export async function GET(request: Request) {
       aboveVWAP: confirmation?.aboveVWAP ?? false,
 
       belowVWAP: confirmation?.belowVWAP ?? false,
-
-      higherHigh: confirmation?.higherHigh ?? false,
-
-      higherLow: confirmation?.higherLow ?? false,
-
-      lowerHigh: confirmation?.lowerHigh ?? false,
-
-      lowerLow: confirmation?.lowerLow ?? false,
 
       bullishEMA: confirmation?.bullishEMA ?? false,
 
