@@ -226,7 +226,6 @@ export function calculateTradeConfirmation(
   }
 
   const latest = candles[candles.length - 1];
-  const previous = candles[candles.length - 2];
 
   const closingPrices = candles.map((candle) => candle.close);
 
@@ -242,12 +241,6 @@ export function calculateTradeConfirmation(
   const aboveVWAP = latest.close > vwap;
   const belowVWAP = latest.close < vwap;
 
-  const higherHigh = latest.high > previous.high;
-  const higherLow = latest.low > previous.low;
-
-  const lowerHigh = latest.high < previous.high;
-  const lowerLow = latest.low < previous.low;
-
   const bullishEMA = ema9 > ema20;
   const bearishEMA = ema9 < ema20;
 
@@ -257,59 +250,43 @@ export function calculateTradeConfirmation(
   let bearishScore = 0;
 
   /*
-   * VWAP alignment: 25 points
+   * DAY TRADE CONFIRMATION
+   *
+   * Core setup:
+   * - VWAP alignment: 35 points
+   * - EMA 9/20 alignment: 35 points
+   * - Relative volume: 30 points
+   *
+   * HH / HL / LH / LL market-structure requirements
+   * are intentionally not used by the Day Trade Scanner.
    */
+
   if (aboveVWAP) {
-    bullishScore += 25;
+    bullishScore += 35;
   }
 
   if (belowVWAP) {
-    bearishScore += 25;
+    bearishScore += 35;
   }
 
-  /*
-   * Market structure: 40 points
-   */
-  if (higherHigh) {
-    bullishScore += 20;
-  }
-
-  if (higherLow) {
-    bullishScore += 20;
-  }
-
-  if (lowerHigh) {
-    bearishScore += 20;
-  }
-
-  if (lowerLow) {
-    bearishScore += 20;
-  }
-
-  /*
-   * EMA alignment: 20 points
-   */
   if (bullishEMA) {
-    bullishScore += 20;
+    bullishScore += 35;
   }
 
   if (bearishEMA) {
-    bearishScore += 20;
+    bearishScore += 35;
   }
 
-  /*
-   * Relative volume: 15 points
-   */
   if (strongVolume) {
-    bullishScore += 15;
-    bearishScore += 15;
+    bullishScore += 30;
+    bearishScore += 30;
   }
 
   const bullishSetup =
-    aboveVWAP && higherHigh && higherLow && bullishEMA && strongVolume;
+    aboveVWAP && bullishEMA && strongVolume;
 
   const bearishSetup =
-    belowVWAP && lowerHigh && lowerLow && bearishEMA && strongVolume;
+    belowVWAP && bearishEMA && strongVolume;
 
   let signal: TradeSignal = "WAIT";
   let direction: "Bullish" | "Bearish" | "Mixed" = "Mixed";
@@ -338,12 +315,6 @@ export function calculateTradeConfirmation(
 
   if (aboveVWAP) confirmations.push("Above VWAP");
   if (belowVWAP) confirmations.push("Below VWAP");
-
-  if (higherHigh) confirmations.push("Higher high");
-  if (higherLow) confirmations.push("Higher low");
-
-  if (lowerHigh) confirmations.push("Lower high");
-  if (lowerLow) confirmations.push("Lower low");
 
   if (bullishEMA) confirmations.push("9 EMA above 20 EMA");
   if (bearishEMA) confirmations.push("9 EMA below 20 EMA");
@@ -380,11 +351,6 @@ export function calculateTradeConfirmation(
 
     aboveVWAP,
     belowVWAP,
-
-    higherHigh,
-    higherLow,
-    lowerHigh,
-    lowerLow,
 
     bullishEMA,
     bearishEMA,
