@@ -257,7 +257,7 @@ export default function SmartMoneyCard({
 
       <div className="mt-5 grid grid-cols-2 gap-3">
         <div className="rounded-xl bg-black p-3">
-          <p className="text-xs text-zinc-500">Premium</p>
+          <p className="text-xs text-zinc-500">Total Flow Premium</p>
           <p className="mt-1 text-lg font-bold text-emerald-400">
             {formatCurrency(premium)}
           </p>
@@ -399,7 +399,7 @@ export default function SmartMoneyCard({
       {timestamp != null && Number.isFinite(timestamp) && (
         <div className="mt-4 rounded-xl border border-zinc-700 bg-black p-3">
           <p className="text-xs font-semibold text-zinc-400">
-            Trade Time (CT)
+            Latest Trade Time (CT)
           </p>
           <p className="mt-1 text-sm font-bold text-white">
             {new Date(timestamp).toLocaleString("en-US", {

@@ -502,6 +502,10 @@ export default function SmartMoneyPage() {
 
         const volume = bullish ? item.callsVolume : item.putsVolume;
 
+        const latestTrade = bullish
+          ? item.latestCall
+          : item.latestPut;
+
         const representativeTrade = bullish
           ? item.bestCall || item.latestCall
           : item.bestPut || item.latestPut;
@@ -529,7 +533,7 @@ export default function SmartMoneyPage() {
 
           expiration: representativeTrade.expiration,
 
-          timestamp: representativeTrade.timestamp,
+          timestamp: latestTrade?.timestamp ?? representativeTrade.timestamp,
 
           side: representativeTrade.side,
 
