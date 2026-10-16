@@ -396,17 +396,24 @@ export default function SmartMoneyCard({
         </div>
       )}
 
-      {timestamp && (
-        <p className="mt-4 text-xs text-zinc-500">
-          Updated{" "}
-          {new Date(timestamp).toLocaleTimeString("en-US", {
-            timeZone: "America/Chicago",
-            hour: "numeric",
-            minute: "2-digit",
-            second: "2-digit",
-          })}{" "}
-          CT
-        </p>
+      {timestamp != null && Number.isFinite(timestamp) && (
+        <div className="mt-4 rounded-xl border border-zinc-700 bg-black p-3">
+          <p className="text-xs font-semibold text-zinc-400">
+            Trade Time (CT)
+          </p>
+          <p className="mt-1 text-sm font-bold text-white">
+            {new Date(timestamp).toLocaleString("en-US", {
+              timeZone: "America/Chicago",
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+              second: "2-digit",
+              hour12: true,
+            })}
+          </p>
+        </div>
       )}
     </article>
   );
