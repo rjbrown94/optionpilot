@@ -21,6 +21,7 @@ type GexResponse = {
     eligibleContracts: number;
     excludedContracts: number;
     largestConcentration: { strike: number; netGex: number; absoluteGex: number } | null;
+    strikes?: { strike: number; callGex: number; putGex: number; netGex: number; absoluteGex: number }[];
   };
 };
 
@@ -117,6 +118,7 @@ export default function GammaExposureRadar() {
             <Metric label="Chain coverage" value={data.complete ? "Complete" : "Partial"} note={`${data.pagesFetched ?? "—"} pages · ${(data.contractsFetched ?? 0).toLocaleString()} fetched`} />
             <Metric label="Eligible contracts" value={gex.eligibleContracts.toLocaleString()} note={`${gex.excludedContracts.toLocaleString()} excluded`} />
           </div>
+          <GexStrikeChart strikes={gex.strikes ?? []} spot={gex.underlyingPrice} concentration={concentration?.strike ?? null} />
           <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-xs text-zinc-400">
             <span>{symbol} spot: {Number.isFinite(gex.underlyingPrice) ? `$${gex.underlyingPrice.toFixed(2)}` : "—"}</span>
             <span>Snapshot retrieved: {data.updatedAt ? new Date(data.updatedAt).toLocaleString() : "Unknown"}</span>
@@ -136,6 +138,75 @@ function Metric({ label, value, note }: { label: string; value: string; note: st
       <p className="text-xs font-semibold uppercase tracking-wide text-zinc-400">{label}</p>
       <p className="mt-2 text-2xl font-bold text-white">{value}</p>
       <p className="mt-1 text-xs text-zinc-500">{note}</p>
+    </div>
+  );
+}
+
+function GexStrikeChart({
+  strikes,
+  spot,
+  concentration,
+}: {
+  strikes: { strike: number; netGex: number; absoluteGex: number }[];
+  spot: number;
+  concentration: number | null;
+}) {
+  const [range, setRange] = useState<"near" | "wide">("near");
+  const valid = strikes.filter((item) =>
+    Number.isFinite(item.strike) && Number.isFinite(item.netGex) && Number.isFinite(item.absoluteGex),
+  );
+  const pct = range === "near" ? 0.05 : 0.15;
+  const nearby = valid.filter((item) => Math.abs(item.strike - spot) <= spot * pct);
+  const sorted = [...nearby].sort((a, b) => Math.abs(b.netGex) - Math.abs(a.netGex));
+  const selected = sorted.slice(0, 25).sort((a, b) => a.strike - b.strike);
+  const maxAbs = Math.max(1, ...selected.map((item) => Math.abs(item.netGex)));
+  const closest = selected.length
+    ? selected.reduce((best, item) => Math.abs(item.strike - spot) < Math.abs(best.strike - spot) ? item : best)
+    : null;
+
+  return (
+    <div className="mt-5 rounded-xl border border-zinc-800 bg-black p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-base font-bold text-white">Estimated GEX by strike</h3>
+          <p className="mt-1 text-xs text-zinc-400">Net exposure by strike · Top 25 magnitudes within the selected price range</p>
+        </div>
+        <div className="flex gap-2">
+          {(["near", "wide"] as const).map((option) => (
+            <button key={option} type="button" onClick={() => setRange(option)}
+              className={`rounded-lg border px-3 py-2 text-xs font-semibold ${range === option ? "border-emerald-400 bg-emerald-500 text-black" : "border-zinc-700 text-zinc-300"}`}>
+              {option === "near" ? "±5%" : "±15%"}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-zinc-400">
+        <span>Reported spot: ${spot.toFixed(2)}</span>
+        <span><span className="text-emerald-400">■</span> Positive net GEX</span>
+        <span><span className="text-rose-400">■</span> Negative net GEX</span>
+      </div>
+      {selected.length === 0 ? (
+        <p className="mt-5 text-sm text-zinc-400">No eligible strike data in this range.</p>
+      ) : (
+        <div className="mt-4 max-h-[440px] space-y-2 overflow-y-auto pr-1">
+          {selected.map((item) => {
+            const positive = item.netGex >= 0;
+            const width = Math.max(0.5, (Math.abs(item.netGex) / maxAbs) * 100);
+            const nearSpot = closest?.strike === item.strike;
+            const largest = concentration === item.strike;
+            return (
+              <div key={item.strike} className={`grid grid-cols-[70px_1fr_90px] items-center gap-3 rounded px-2 py-1 text-xs ${largest ? "bg-amber-500/10" : nearSpot ? "bg-zinc-900" : ""}`}>
+                <span className="font-semibold text-zinc-200">${item.strike.toLocaleString()}{largest ? " ★" : ""}</span>
+                <div className="relative h-5 overflow-hidden rounded bg-zinc-900" aria-label={`Strike ${item.strike}: net GEX ${money(item.netGex)}`}>
+                  <div className={`h-full rounded ${positive ? "bg-emerald-500" : "bg-rose-500"}`} style={{ width: `${width}%` }} />
+                </div>
+                <span className={`text-right font-medium ${positive ? "text-emerald-400" : "text-rose-400"}`}>{money(item.netGex)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <p className="mt-3 text-xs text-zinc-500">★ Largest absolute concentration, when visible. The highlighted row nearest spot is a reference, not a support/resistance signal. Bars show net GEX magnitude; this is an open-interest model, not confirmed dealer positioning.</p>
     </div>
   );
 }

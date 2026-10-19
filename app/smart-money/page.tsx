@@ -809,10 +809,38 @@ export default function SmartMoneyPage() {
 
           <MetricCard
             title="Call / Put Ratio"
-            value={callPutRatio.toFixed(2)}
+            value={
+              totalPremium === 0 || putPremium === 0
+                ? "N/A"
+                : callPutRatio.toFixed(2)
+            }
             subtitle="Premium-weighted ratio, not contract count."
-            badge={callPutRatio >= 1 ? "Bullish" : "Bearish"}
-            tone={callPutRatio >= 1 ? "bullish" : "bearish"}
+            badge={
+              totalPremium === 0
+                ? "No Data"
+                : putPremium === 0
+                  ? "Calls Only"
+                  : callPremium === 0
+                    ? "Puts Only"
+                    : callPutRatio > 1
+                      ? "Bullish"
+                      : callPutRatio < 1
+                        ? "Bearish"
+                        : "Balanced"
+            }
+            tone={
+              totalPremium === 0
+                ? "neutral"
+                : putPremium === 0
+                  ? "bullish"
+                  : callPremium === 0
+                    ? "bearish"
+                    : callPutRatio > 1
+                      ? "bullish"
+                      : callPutRatio < 1
+                        ? "bearish"
+                        : "neutral"
+            }
           />
 
           <MetricCard
