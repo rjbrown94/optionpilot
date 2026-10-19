@@ -27,6 +27,9 @@ type CandleApiResponse = {
   cached?: boolean;
   warning?: string;
   error?: string;
+  latestCandleTime?: string | null;
+  latestCandleAgeMinutes?: number | null;
+  stale?: boolean;
 };
 
 function normalizeSymbol(value: string | null): string {
@@ -52,11 +55,18 @@ function normalizeCandles(
         isFiniteNumber(candle.close) &&
         isFiniteNumber(candle.volume),
     )
+    .filter(
+      (candle) =>
+        typeof (candle.datetime || candle.time) === "string" &&
+        !Number.isNaN(
+          Date.parse(candle.datetime || candle.time || ""),
+        ),
+    )
     .map((candle) => ({
       datetime:
         candle.datetime ||
         candle.time ||
-        new Date().toISOString(),
+        "",
 
       open: candle.open as number,
       high: candle.high as number,
@@ -249,6 +259,15 @@ export async function GET(request: Request) {
 
       updatedAt:
         new Date().toISOString(),
+
+      latestCandleTime:
+        candleData.latestCandleTime ?? null,
+
+      latestCandleAgeMinutes:
+        candleData.latestCandleAgeMinutes ?? null,
+
+      stale:
+        candleData.stale ?? true,
 
       timeframe: "5min",
 

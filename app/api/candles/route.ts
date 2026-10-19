@@ -122,29 +122,69 @@ function isValidCandle(candle: Candle): boolean {
 }
 
 function parseTwelveDataTime(datetime: string): Date | null {
-  if (!datetime) {
-    return null;
-  }
+  if (!datetime) return null;
 
   const normalized = datetime.includes("T")
     ? datetime
     : datetime.replace(" ", "T");
 
-  if (normalized.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(normalized)) {
+  if (
+    normalized.endsWith("Z") ||
+    /[+-]\\d{2}:\\d{2}$/.test(normalized)
+  ) {
     const parsed = new Date(normalized);
-
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
 
-  /*
-   * Twelve Data returns US equity timestamps
-   * in New York local time when timezone is
-   * America/New_York.
-   *
-   * August is daylight saving time, so ET is -04:00.
-   */
-  const parsed = new Date(`${normalized}-04:00`);
+  const match = normalized.match(
+    /^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})(?::(\\d{2}))?$/
+  );
 
+  if (!match) return null;
+
+  const [, year, month, day, hour, minute, second = "00"] = match;
+
+  const localTime = Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second),
+  );
+
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+
+  let timestamp = localTime;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const parts = formatter.formatToParts(new Date(timestamp));
+    const values = Object.fromEntries(
+      parts.map((part) => [part.type, part.value]),
+    );
+
+    const observedLocalTime = Date.UTC(
+      Number(values.year),
+      Number(values.month) - 1,
+      Number(values.day),
+      Number(values.hour),
+      Number(values.minute),
+      Number(values.second),
+    );
+
+    timestamp += localTime - observedLocalTime;
+  }
+
+  const parsed = new Date(timestamp);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
