@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import SmartMoneyCard from "@/components/smart-money/SmartMoneyCard";
+import GammaExposureRadar from "@/components/smart-money/GammaExposureRadar";
 import LoadingSkeleton from "@/components/ui/LoadingSkeleton";
 import MetricCard from "@/components/ui/MetricCard";
 import SectionHeader from "@/components/ui/SectionHeader";
@@ -786,6 +787,8 @@ export default function SmartMoneyPage() {
             )}
           </div>
         </section>
+
+        <GammaExposureRadar />
 
         <section className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <MetricCard
